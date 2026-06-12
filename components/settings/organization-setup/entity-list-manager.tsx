@@ -48,6 +48,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useOrgSetupSection, newId, type SetupSection } from "./use-org-setup";
 
@@ -116,6 +126,7 @@ export function EntityListManager({
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
   const [draft, setDraft] = useState<Record<string, string | number | boolean>>(
     {},
   );
@@ -230,10 +241,14 @@ export function EntityListManager({
     if (ok) setDialogOpen(false);
   };
 
-  const remove = async (item: Item) => {
-    const label = (item[primaryKey] as string) || `this ${itemNoun}`;
-    if (!confirm(`Delete "${label}"?`)) return;
-    await save(items.filter((it) => it.id !== item.id));
+  const handleDeleteClick = (item: Item) => {
+    setItemToDelete(item);
+  };
+
+  const runDelete = async () => {
+    if (!itemToDelete) return;
+    const ok = await save(items.filter((it) => it.id !== itemToDelete.id));
+    if (ok) setItemToDelete(null);
   };
 
   // ── CSV import ────────────────────────────────────────────────────────────
@@ -332,6 +347,35 @@ export function EntityListManager({
 
   return (
     <div>
+      <AlertDialog open={itemToDelete !== null} onOpenChange={(open) => { if (!open) setItemToDelete(null); }}>
+        <AlertDialogContent className="z-[99999] bg-white border border-slate-200 shadow-xl max-w-[400px] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-bold">
+              <Trash2 className="h-5 w-5 text-red-600 shrink-0" />
+              Delete &ldquo;{itemToDelete ? String(itemToDelete[primaryKey] ?? "") : ""}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 text-sm text-left">
+              Are you sure you want to delete this {itemNoun}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={saving} className="border border-slate-200 hover:bg-slate-100 font-medium">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void runDelete();
+              }}
+              disabled={saving}
+              className="bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-colors"
+            >
+              {saving ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm font-medium text-foreground">
@@ -479,7 +523,7 @@ export function EntityListManager({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => remove(item)}
+                              onClick={() => handleDeleteClick(item)}
                               aria-label="Delete"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -525,7 +569,7 @@ export function EntityListManager({
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive"
-                          onClick={() => remove(item)}
+                          onClick={() => handleDeleteClick(item)}
                           aria-label="Delete"
                         >
                           <Trash2 className="h-4 w-4" />

@@ -68,6 +68,9 @@ export interface AttendanceConfig {
   geofenceLat: number | null;
   geofenceLng: number | null;
   geofenceRadiusM: number | null;
+  /** When true, a punch (in OR out) outside the geofence radius is allowed
+   *  only with a reason, which is stored on the attendance row. */
+  requireReasonOutsideRadius: boolean;
   ipWhitelist: string[];
   payableBasis: PayableBasis;
   workflowModuleName: string | null;
@@ -125,6 +128,7 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   geofenceLat: null,
   geofenceLng: null,
   geofenceRadiusM: null,
+  requireReasonOutsideRadius: false,
   ipWhitelist: [],
   payableBasis: 'monthDays',
   workflowModuleName: 'Attendance',
@@ -266,6 +270,25 @@ async function loadAttendanceConfigFromDb(
       where: { organizationId, isActive: true },
       orderBy: { createdAt: 'desc' },
     });
+    // Columns the running Prisma client may not know yet (added after the last
+    // `prisma generate`) don't come back on the typed row. Read them via raw
+    // SQL so the feature works before the client is regenerated. Best-effort.
+    if (row && row.requireReasonOutsideRadius === undefined) {
+      try {
+        const extra = await prisma.$queryRawUnsafe<
+          Array<{ require_reason_outside_radius: boolean | null }>
+        >(
+          'SELECT "require_reason_outside_radius" FROM "attendance_configurations" WHERE "id" = $1 LIMIT 1',
+          row.id,
+        );
+        if (extra.length) {
+          row.requireReasonOutsideRadius =
+            !!extra[0].require_reason_outside_radius;
+        }
+      } catch {
+        /* column truly absent → leave undefined, coerced to false below */
+      }
+    }
     if (!row) {
       return { ...DEFAULT_ATTENDANCE_CONFIG, organizationId };
     }
@@ -307,6 +330,7 @@ async function loadAttendanceConfigFromDb(
       geofenceLat: row.geofenceLat ?? null,
       geofenceLng: row.geofenceLng ?? null,
       geofenceRadiusM: row.geofenceRadiusM ?? null,
+      requireReasonOutsideRadius: !!row.requireReasonOutsideRadius,
       ipWhitelist: coerceIpList(row.ipWhitelist),
       payableBasis: coercePayableBasis(row.payableBasis),
       workflowModuleName:
@@ -378,6 +402,7 @@ export interface AttendanceConfigUpdate {
   geofenceLat?: number | null;
   geofenceLng?: number | null;
   geofenceRadiusM?: number | null;
+  requireReasonOutsideRadius?: boolean;
   ipWhitelist?: string[];
   payableBasis?: PayableBasis;
   workflowModuleName?: string | null;
@@ -414,6 +439,43 @@ function unknownArgumentField(err: unknown): string | null {
   return m ? m[1] : null;
 }
 
+// Map of AttendanceConfigUpdate keys → DB column names for fields that may be
+// missing from a stale Prisma client. Only these are safe to write via raw SQL
+// from the dropped-fields fallback.
+const RAW_WRITABLE_COLUMNS: Record<string, string> = {
+  requireReasonOutsideRadius: 'require_reason_outside_radius',
+  checkInReminderMinutes: 'check_in_reminder_minutes',
+};
+
+// Persist columns the typed upsert dropped (because the running Prisma client
+// doesn't know them yet) using raw SQL, so an admin save isn't silently lost
+// before `prisma generate` is run. Only writes recognised columns; unknown
+// dropped fields are left for the regen path. Best-effort.
+async function backfillDroppedColumns(
+  organizationId: string,
+  droppedFields: string[],
+  patch: AttendanceConfigUpdate,
+): Promise<void> {
+  for (const field of droppedFields) {
+    const col = RAW_WRITABLE_COLUMNS[field];
+    if (!col) continue;
+    const value = (patch as any)[field];
+    if (value === undefined) continue;
+    try {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "attendance_configurations" SET "${col}" = $1 WHERE "organization_id" = $2`,
+        value,
+        organizationId,
+      );
+    } catch (err: any) {
+      console.warn(
+        `[attendance-config] raw backfill of ${col} failed:`,
+        err?.message || err,
+      );
+    }
+  }
+}
+
 export async function upsertAttendanceConfig(
   organizationId: string,
   patch: AttendanceConfigUpdate,
@@ -447,6 +509,10 @@ export async function upsertAttendanceConfig(
             ', ',
           )}. Run \`npx prisma generate\` to enable them.`,
         );
+        // The columns exist in the DB even though the stale client rejected
+        // them — write the ones we recognise via raw SQL so the save isn't
+        // silently lost until `prisma generate` runs.
+        await backfillDroppedColumns(organizationId, droppedFields, patch);
       }
       // Invalidate cache BEFORE re-reading so the read repopulates from DB.
       await cacheInvalidate('hr', attendanceConfigKey(organizationId));

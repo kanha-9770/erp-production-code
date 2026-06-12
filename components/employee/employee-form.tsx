@@ -653,14 +653,38 @@ export function EmployeeForm({
           setTeams(json.teams ?? []);
         }
       } catch {
-        // Soft-fail: form stays usable without teams; field just shows
-        // "No teams configured yet" in the dropdown.
+        // Soft-fail: form stays usable without teams; the read-only team
+        // field just shows "No teams configured yet".
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // ── Auto-assign engagement team (new employees only) ───────────────────
+  // HR doesn't pick the engagement team — every newly-created employee is
+  // dropped into a RANDOM active team, and the field below is rendered
+  // read-only. Runs once, after the teams list lands, and only when nothing
+  // is assigned yet, so a re-render or a teams refetch can't reshuffle the
+  // pick. On edit we leave the employee's existing team untouched.
+  const isNewEmployee = !initial?.id;
+  const teamAutoAssignedRef = useRef(false);
+  useEffect(() => {
+    if (!isNewEmployee) return;
+    if (teamAutoAssignedRef.current) return;
+    if (values.engagementTeamId) return;
+    const assignable = teams.filter((t) => t.isActive);
+    if (assignable.length === 0) return;
+    const picked = assignable[Math.floor(Math.random() * assignable.length)];
+    teamAutoAssignedRef.current = true;
+    set("engagementTeamId", picked.id);
+    // Keep the legacy display field in sync with the chosen team so old
+    // readers (grid, reports) that look up by name still work.
+    set("employeeEngagementTeamName", picked.name);
+    // `set` is stable (closes over setValues); excluded from deps on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNewEmployee, teams]);
 
   // Per-hour salary derived from monthly CTC ÷ (22 working days × hours/day).
   // 22 matches the engine's `calculateDailyPayroll` standard divisor. Hours/
@@ -1636,57 +1660,52 @@ export function EmployeeForm({
               placeholder="8"
             />
           </Field>
-          <Field label="Employee Engagement Team">
-            <Select
-              value={values.engagementTeamId || "__none__"}
-              onValueChange={(v) => {
-                if (v === "__none__") {
-                  set("engagementTeamId", "");
-                  set("employeeEngagementTeamName", "");
-                  return;
-                }
-                const picked = teams.find((t) => t.id === v);
-                set("engagementTeamId", v);
-                // Keep the legacy display field in sync with the chosen team
-                // so old readers (grid, reports) that look up by name still work.
-                set("employeeEngagementTeamName", picked?.name ?? "");
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="No team" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— No team —</SelectItem>
-                {teams.length === 0 ? (
-                  <div className="px-2 py-2 text-xs text-muted-foreground">
-                    No teams configured. Create one in Settings →
-                    Employee Engagement.
-                  </div>
-                ) : (
-                  teams
-                    // Keep the currently-assigned team visible even if it's
-                    // been deactivated — otherwise the dropdown silently
-                    // drops the existing choice.
-                    .filter((t) => t.isActive || t.id === values.engagementTeamId)
-                    .map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        <span className="flex items-center gap-2">
-                          <span
-                            className="inline-block h-2 w-2 rounded-full"
-                            style={{ backgroundColor: t.color ?? "#94a3b8" }}
-                          />
-                          {t.name}
-                          {!t.isActive && (
-                            <span className="text-[10px] text-muted-foreground">
-                              (inactive)
-                            </span>
-                          )}
-                        </span>
-                      </SelectItem>
-                    ))
-                )}
-              </SelectContent>
-            </Select>
+          <Field
+            label="Employee Engagement Team"
+            hint={
+              isNewEmployee
+                ? "Auto-assigned at random — not editable"
+                : "Assigned team — not editable"
+            }
+          >
+            {/* Read-only: the team is system-assigned (random on create), so
+                HR sees the assignment but can't change it. The underlying
+                engagementTeamId / employeeEngagementTeamName values are what
+                actually get submitted. */}
+            {(() => {
+              const assigned = teams.find(
+                (t) => t.id === values.engagementTeamId,
+              );
+              const name =
+                values.employeeEngagementTeamName || assigned?.name || "";
+              const hasTeam = !!(values.engagementTeamId || name);
+              return (
+                <div
+                  className="flex h-10 items-center gap-2 rounded-md border border-input bg-muted/40 px-3 text-sm"
+                  aria-readonly="true"
+                >
+                  {hasTeam ? (
+                    <>
+                      <span
+                        className="inline-block h-2 w-2 rounded-full"
+                        style={{ backgroundColor: assigned?.color ?? "#94a3b8" }}
+                      />
+                      <span className="truncate">{name || "—"}</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {teams.length === 0
+                        ? "No teams configured yet"
+                        : isNewEmployee
+                          ? teams.some((t) => t.isActive)
+                            ? "Assigning team…"
+                            : "No active teams available"
+                          : "No team"}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </Field>
           <Field label="Status *">
             <Select

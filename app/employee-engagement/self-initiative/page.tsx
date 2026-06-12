@@ -391,8 +391,8 @@ export default function SelfInitiativePage() {
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+        <SheetContent side="right" resizable defaultWidth={768} hideClose className="w-full overflow-y-auto p-0 flex flex-col">
+          <SheetHeader showClose className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
             <SheetTitle className="flex items-center gap-2">
               Self Initiative <Info className="h-3.5 w-3.5 text-muted-foreground" />
             </SheetTitle>
@@ -577,31 +577,31 @@ function InitiativeForm({ initial, currentEmployee, canSetPoints, onCancel, onSu
             <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
               <Input
                 value={formData.employeeId}
-                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                readOnly
                 placeholder="e.g. EMP-0001"
-                className={showErr("employeeId") ? "border-red-500" : ""}
+                className={`bg-muted/50 text-muted-foreground cursor-not-allowed ${showErr("employeeId") ? "border-red-500" : ""}`}
               />
             </FieldWrapper>
 
             <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
               <Input
                 value={formData.firstName}
-                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
-                className={showErr("firstName") ? "border-red-500" : ""}
+                readOnly
+                className={`bg-muted/50 text-muted-foreground cursor-not-allowed ${showErr("firstName") ? "border-red-500" : ""}`}
               />
             </FieldWrapper>
 
             <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
               <Input
                 value={formData.lastName}
-                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
-                className={showErr("lastName") ? "border-red-500" : ""}
+                readOnly
+                className={`bg-muted/50 text-muted-foreground cursor-not-allowed ${showErr("lastName") ? "border-red-500" : ""}`}
               />
             </FieldWrapper>
 
             <FieldWrapper label="Department">
-              <Select value={formData.department} onValueChange={v => setFormData({ ...formData, department: v })}>
-                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+              <Select value={formData.department} disabled>
+                <SelectTrigger className="bg-muted/50 text-muted-foreground cursor-not-allowed"><SelectValue placeholder="Select an option" /></SelectTrigger>
                 <SelectContent>
                   {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                 </SelectContent>
@@ -611,7 +611,8 @@ function InitiativeForm({ initial, currentEmployee, canSetPoints, onCancel, onSu
             <FieldWrapper label="Employee Engagement Team Name">
               <Input
                 value={formData.employeeEngagementTeamName}
-                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+                readOnly
+                className="bg-muted/50 text-muted-foreground cursor-not-allowed"
               />
             </FieldWrapper>
 

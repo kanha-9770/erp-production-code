@@ -76,6 +76,10 @@ export interface PunchInput {
   // end the leave for today onward (cancel if it's day 1, else shorten) and
   // let the punch through instead of blocking with ON_APPROVED_LEAVE.
   endLeaveEarly?: boolean;
+  // Reason the employee typed for punching outside the office geofence. Only
+  // consulted when the org has requireReasonOutsideRadius on AND this punch is
+  // outside the radius — in which case it's mandatory and stored on the row.
+  outOfRangeReason?: string | null;
 }
 
 export interface AttendanceStatus {
@@ -141,6 +145,7 @@ export interface AttendanceStatus {
     lat: number | null;
     lng: number | null;
     radiusM: number | null;
+    requireReasonOutsideRadius: boolean;
   };
   shift: {
     start: string; // HH:mm
@@ -1035,6 +1040,9 @@ export async function getStatus(
       lat: cfg.geofenceLat,
       lng: cfg.geofenceLng,
       radiusM: cfg.geofenceRadiusM,
+      // Surfaced so the widget knows to demand a reason (vs a plain confirm)
+      // when the punch location is outside the radius.
+      requireReasonOutsideRadius: cfg.requireReasonOutsideRadius,
     },
     shift: { start: shift.start, end: shift.end, isCustom: shift.isCustom },
     overtime: {
@@ -1331,6 +1339,36 @@ export async function recordPunch(
       403,
     );
   }
+
+  // Reason-required gate (independent of ENFORCE). When the org turns on
+  // requireReasonOutsideRadius and this punch is OUTSIDE the radius, allow it
+  // only if the employee supplied a reason. We return a distinct code the
+  // widget recognises to pop a "why are you punching from here?" dialog, then
+  // retries the same punch with `outOfRangeReason` filled in. The reason is
+  // persisted on the row (checkIn/checkOutOutOfRangeReason) for HR audit.
+  const outOfRange =
+    cfg.requireReasonOutsideRadius && !isInsideFence(input.geo ?? null, cfg);
+  const trimmedReason = (input.outOfRangeReason ?? '').trim();
+  if (outOfRange && !trimmedReason) {
+    await safeAudit(
+      auditEmail,
+      input.userId,
+      input.organizationId,
+      `${auditAction} needs reason (OUT_OF_RANGE)`,
+      { date, code: 'OUT_OF_RANGE_REASON_REQUIRED', source, geo: input.geo ?? null },
+      input.ip ?? null,
+      input.userAgent ?? null,
+      null,
+    );
+    throw new AttendanceError(
+      'OUT_OF_RANGE_REASON_REQUIRED',
+      'You are outside the office radius. Please provide a reason to ' +
+        (input.type === 'IN' ? 'check in' : 'check out') +
+        ' from here.',
+      422,
+    );
+  }
+
   if (!isIpAllowed(input.ip, cfg)) {
     await safeAudit(
       auditEmail,
@@ -1658,6 +1696,31 @@ export async function recordPunch(
       };
     }
     outcome = await buildOutcome(input, existing.id, true);
+  }
+
+  // Persist the out-of-radius reason via raw SQL (not the typed write above)
+  // so it works even when the running Prisma client predates these columns —
+  // the typed create/update would otherwise reject the unknown field and 500
+  // the whole punch. Only runs when the punch was actually outside the fence
+  // and a reason was given. Best-effort: a failure here must not fail the
+  // punch that already succeeded.
+  if (outOfRange && trimmedReason && outcome.attendanceId) {
+    const col =
+      input.type === 'IN'
+        ? 'check_in_out_of_range_reason'
+        : 'check_out_out_of_range_reason';
+    try {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "attendance_records" SET "${col}" = $1 WHERE "id" = $2`,
+        trimmedReason,
+        outcome.attendanceId,
+      );
+    } catch (err: any) {
+      console.warn(
+        '[attendance] failed to persist out-of-range reason:',
+        err?.message || err,
+      );
+    }
   }
 
   // Commit the rate-limit slot only after we've actually written to the DB —

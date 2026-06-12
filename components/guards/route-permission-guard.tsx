@@ -9,10 +9,13 @@ import { useDispatch } from "react-redux"
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-/** How often (ms) to poll for permission changes. Permission changes are rare;
- *  at 15s every open tab hit /api/auth/perm-version 4×/min (2 DB queries each).
- *  60s cuts that background load 4× while staying responsive enough. */
-const POLL_INTERVAL = 60_000 // 60 seconds
+/** How often (ms) to poll for permission changes. The /api/auth/perm-version
+ *  endpoint is now Redis-cached (cachedSWR), so every open tab across every
+ *  user collapses into ~1 DB read per org per cache window regardless of poll
+ *  frequency — the per-tab DB cost the old 60s value guarded against no longer
+ *  exists. 15s keeps grants/revocations reflecting near-real-time and matches
+ *  the "within 15 seconds" copy shown in the Route Permissions UI footer. */
+const POLL_INTERVAL = 15_000 // 15 seconds
 
 /** Routes that never require permission checks (unauthenticated pages) */
 const PUBLIC_ROUTES = [
@@ -94,6 +97,23 @@ export function RoutePermissionGuard({
   const allowedRoutes: string[] = userData?.user?.allowedRoutes ?? []
   const deniedRoutes: string[] = (userData?.user as any)?.deniedRoutes ?? []
 
+  // Mint timestamp of the user's signed auth-meta cookie (from /api/auth/me).
+  // The poll compares this against the org's perm-version: if a permission
+  // change is newer than the cookie, the cookie is stale and is refreshed —
+  // even on the very first poll after a page load. Held in a ref so the poll
+  // closure always reads the latest value without re-creating the interval.
+  const permMetaTs: number = (userData?.user as any)?.permMetaTs ?? 0
+  const permMetaTsRef = useRef(0)
+  useEffect(() => {
+    permMetaTsRef.current = permMetaTs
+  }, [permMetaTs])
+
+  // Don't start polling / baselining until /api/auth/me has resolved, so the
+  // staleness comparison below always has a real cookie timestamp to compare
+  // against (otherwise the first poll could fire with permMetaTs still 0 and
+  // refresh unnecessarily on every cold load).
+  const userReady = !!userData
+
   // ── Check access on every route change ──────────────────────────────────
   useEffect(() => {
     if (isPublicRoute(pathname)) return
@@ -126,6 +146,7 @@ export function RoutePermissionGuard({
 
   useEffect(() => {
     if (isPublicRoute(pathname)) return
+    if (!userReady) return // wait for /api/auth/me before baselining
 
     let cancelled = false
 
@@ -143,9 +164,22 @@ export function RoutePermissionGuard({
 
         if (cancelled) return
 
-        // First poll — store version baseline
+        // First poll — store version baseline. Crucially, the cookie this user
+        // is currently carrying may PREDATE the latest permission change (e.g.
+        // an admin granted them access before they loaded/reloaded the page).
+        // In that case the signed auth-meta cookie is stale, so /api/auth/me is
+        // returning old allowedRoutes and the new page never appears. Detect it
+        // by comparing the server version against the cookie's mint timestamp,
+        // and refresh immediately instead of waiting for the cookie to age out
+        // (5 min) or for a *future* change to bump the version.
         if (lastVersionRef.current === 0) {
           lastVersionRef.current = serverVersion
+          if (serverVersion > permMetaTsRef.current) {
+            console.log(
+              `[RoutePermissionGuard] stale cookie on load (serverVersion=${serverVersion} > cookieTs=${permMetaTsRef.current}) → refreshing`
+            )
+            await refreshAndRecheck()
+          }
           return
         }
 
@@ -169,7 +203,7 @@ export function RoutePermissionGuard({
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [pathname, refreshAndRecheck])
+  }, [pathname, userReady, refreshAndRecheck])
 
   return <>{children}</>
 }

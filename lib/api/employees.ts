@@ -197,6 +197,10 @@ export const employeesApi = baseApi.injectEndpoints({
         const q = qs.toString();
         return q ? `/employees?${q}` : "/employees";
       },
+      // Cache each page/filter combination for 5 min so revisiting a page you
+      // already viewed (Prev/Next paging, re-applying a filter) is served from
+      // cache instantly instead of re-hitting the server every time.
+      keepUnusedDataFor: 300,
       providesTags: (result) =>
         result
           ? [

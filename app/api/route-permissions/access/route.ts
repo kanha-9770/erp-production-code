@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { cacheInvalidate, buildKey } from "@/lib/cache"
 
 /**
  * GET /api/route-permissions/access?routeId=...
@@ -126,6 +127,17 @@ export async function PUT(request: NextRequest) {
         }
       }
     })
+
+    // Bust the perm-version cache for this org immediately. perm-version is
+    // served stale-while-revalidate, so without this the next poll would
+    // return the OLD version and only trigger a background refresh — costing a
+    // second poll cycle before clients notice. Deleting the key forces the very
+    // next poll to recompute fresh from DB, so grants/revocations propagate in
+    // a single poll interval (~15s) instead of two.
+    await cacheInvalidate(
+      "auth",
+      buildKey("auth", "perm-version", route.organizationId)
+    )
 
     return NextResponse.json({ success: true })
   } catch (error) {

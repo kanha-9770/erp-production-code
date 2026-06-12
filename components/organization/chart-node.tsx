@@ -7,11 +7,23 @@ import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import { TreeConnectors } from "./tree-connectors"
 import { useDeleteOrgUnitMutation } from "@/lib/api/organization"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = false }: any) {
   const { state, dispatch, refreshData } = useRoles()
   const { toast } = useToast()
   const [deleteOrgUnit] = useDeleteOrgUnitMutation()
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
 
   const hasChildren = unit.children && unit.children.length > 0
   // Node is visible (expanded) when its ID is NOT in the collapsed set
@@ -29,10 +41,13 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
     dispatch({ type: "TOGGLE_ORG_EXPAND", payload: { unitId: unit.id } })
   }
 
-  const handleDelete = async (e: React.MouseEvent) => {
+  const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm(`Delete "${unit.name}" and all descendants?`)) return
+    setConfirmDeleteOpen(true)
+  }
 
+  const runDelete = async () => {
+    setDeleting(true)
     try {
       const wasSelected = state.selectedOrgUnit?.id === unit.id
       await deleteOrgUnit({ organizationId: state.organizationId, unitId: unit.id }).unwrap()
@@ -41,18 +56,50 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
       if (wasSelected) {
         dispatch({ type: "SELECT_ORG_UNIT", payload: { unit: null } })
       }
+      setConfirmDeleteOpen(false)
     } catch (error) {
       toast({
         title: "Error",
         description: (error as Error).message || "Failed to delete organization unit",
         variant: "destructive",
       })
+    } finally {
+      setDeleting(false)
     }
   }
 
   return (
     <div className="flex flex-col items-center relative flex-1">
       <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent className="z-[99999] bg-white border border-slate-200 shadow-xl max-w-[400px] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-bold">
+              <Trash2 className="h-5 w-5 text-red-600 shrink-0" />
+              Delete &ldquo;{unit.name}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 text-sm text-left">
+              Are you sure you want to delete &ldquo;{unit.name}&rdquo; and all of its descendants? They will be moved to the recycle bin and can be restored later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={deleting} className="border border-slate-200 hover:bg-slate-100 font-medium">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                void runDelete()
+              }}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-colors"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div
         role="button"
@@ -119,8 +166,9 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
           {/* Delete Button - Hidden when this is the only root node */}
           {!isOnlyRootNode && (
             <button
-              onClick={handleDelete}
+              onClick={handleDeleteClick}
               className="bg-red-500 text-white p-1 rounded-full shadow-lg hover:bg-red-700"
+              title="Delete unit"
             >
               <Trash2 className="h-3 w-3" />
             </button>
