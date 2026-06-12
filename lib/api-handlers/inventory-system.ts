@@ -23,11 +23,30 @@ import {
   RESET_INVENTORY_DATA,
   requireInventoryPermission,
 } from "@/lib/permissions/inventory-permissions";
+import { isOrgAdmin } from "@/lib/permissions/has-permission";
+import {
+  assertSectionEditsAllowed,
+  getSectionAccess,
+} from "@/lib/permissions/section-permissions";
+import {
+  findMatchingProcess,
+  submitForApproval,
+  cancelOpenRequestsForRecords,
+  APPROVAL_TX_OPTS,
+} from "@/lib/approvals/engine";
+import { ApprovalLockedError } from "@/lib/approvals/errors";
+import type { ApprovalMeta } from "@/lib/approvals/types";
+import {
+  inventoryApprovalAdapter,
+  INVENTORY_MODULE,
+  PENDING_STATUS,
+} from "@/lib/inventory-system/approval-adapter";
 import type {
   InventoryItem,
   InventoryMovement,
   InventorySnapshot,
   MasterType,
+  SectionAccess,
   SubmoduleKey,
 } from "@/lib/inventory-system/types";
 
@@ -61,8 +80,10 @@ export interface ListItemsResult {
 
 const SNAPSHOT_VERSION = 1;
 // Keys the client owns — never let a create/update payload overwrite them.
-// `itemCode` is system-generated and locked, so it's reserved too.
-const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "itemCode"];
+// `itemCode` is system-generated and locked, so it's reserved too. `_approval`
+// is the server-only approval marker (written exclusively by the approval
+// engine) — a client must never be able to forge or clear it.
+const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "itemCode", "_approval"];
 
 function isValidSubmodule(s: unknown): s is SubmoduleKey {
   return typeof s === "string" && (SUBMODULE_ORDER as string[]).includes(s);
@@ -123,7 +144,10 @@ function toRecordRaw(row: {
 // like "1a2" slip past the guard into a crashing ::numeric cast.) Constant, no
 // user input — safe to Prisma.raw.
 const NUMERIC_RE = "'^-?[0-9]+(\\.[0-9]+)?$'";
-const SQL_NOT_OVERRIDDEN = Prisma.sql`(status IS NULL OR status NOT IN ('INACTIVE','MAINTENANCE','RETIRED'))`;
+// PENDING_APPROVAL / REJECTED are approval-workflow override statuses — like
+// INACTIVE/MAINTENANCE/RETIRED they must short-circuit the quantity-derived
+// stock status so a pending/rejected row isn't reclassified as ACTIVE/LOW/OUT.
+const SQL_NOT_OVERRIDDEN = Prisma.sql`(status IS NULL OR status NOT IN ('INACTIVE','MAINTENANCE','RETIRED','PENDING_APPROVAL','REJECTED'))`;
 const SQL_CUR = Prisma.sql`COALESCE(CASE WHEN (data->>'currentStock') ~ ${Prisma.raw(NUMERIC_RE)} THEN (data->>'currentStock')::numeric END, 0)`;
 const SQL_MIN = Prisma.sql`COALESCE(CASE WHEN (data->>'minStock') ~ ${Prisma.raw(NUMERIC_RE)} THEN (data->>'minStock')::numeric END, 0)`;
 const SQL_OUT_PRED = Prisma.sql`(${SQL_NOT_OVERRIDDEN} AND ${SQL_CUR} <= 0)`;
@@ -157,7 +181,9 @@ function buildItemsWhere(ctx: InvCtx, q: ListItemsQuery): Prisma.Sql {
     case "ACTIVE": parts.push(SQL_ACTIVE_PRED); break;
     case "INACTIVE":
     case "MAINTENANCE":
-    case "RETIRED": parts.push(Prisma.sql`status = ${q.status}`); break;
+    case "RETIRED":
+    case "PENDING_APPROVAL":
+    case "REJECTED": parts.push(Prisma.sql`status = ${q.status}`); break;
     default: break; // no status filter
   }
 
@@ -354,9 +380,15 @@ export const InventoryHandlers = {
     }
     for (const k of SUBMODULE_ORDER) items[k] ??= [];
 
+    const sectionAccess = (await getSectionAccess(
+      ctx.userId,
+      ctx.organizationId,
+      "inventory",
+    )) as SectionAccess;
+
     // Movements are a client-side local ledger (no API backend yet) — the
     // snapshot carries an empty list to satisfy the type.
-    return { version: SNAPSHOT_VERSION, masters, items, movements: [] };
+    return { version: SNAPSHOT_VERSION, masters, items, movements: [], sectionAccess };
   },
 
   /** Just the master registry — the provider's cheap mount-time load. */
@@ -449,7 +481,24 @@ export const InventoryHandlers = {
     const schema = getSchema(submodule);
     const clean = stripReserved(data || {}); // `itemCode` already stripped (RESERVED)
 
-    // Mint the item code and persist it atomically with the record.
+    // Restricted form sections may only be pre-filled by their grantees
+    // (diffed against the schema defaults — untouched defaults pass). Only the
+    // schema-driven item submodules reach here — movements ("movement") have
+    // their own handlers and isValidSubmodule rejects them above.
+    await assertSectionEditsAllowed({
+      userId: ctx.userId,
+      organizationId: ctx.organizationId,
+      module: "inventory",
+      submodule,
+      existing: null,
+      patch: clean,
+    });
+
+    const userStatus = (clean.status as string) ?? null;
+
+    // Mint the item code and persist it atomically with the record. If an
+    // approval process intercepts the create, the record is created then
+    // immediately held PENDING (the request needs the record id to point at).
     const row = await prisma.$transaction(async (tx) => {
       const itemCode = await nextCode(tx, {
         scopeKey: `inv:${ctx.organizationId}:${submodule}`,
@@ -457,16 +506,46 @@ export const InventoryHandlers = {
         computeSeed: () =>
           maxCodeSuffix(tx, "inventory_records", ctx.organizationId, submodule, "itemCode", schema.codePrefix),
       });
-      return tx.inventoryRecord.create({
+      const recordData: Record<string, unknown> = { ...clean, itemCode };
+      const created = await tx.inventoryRecord.create({
         data: {
           organizationId: ctx.organizationId,
           submodule,
-          status: (clean.status as string) ?? null,
-          data: { ...clean, itemCode } as any,
+          status: userStatus,
+          data: recordData as any,
           createdById: ctx.userId,
         },
       });
-    });
+
+      const normalized = await inventoryApprovalAdapter.canonicalizeData(ctx.organizationId, submodule, recordData);
+      const changedKeys = Object.keys(recordData).filter((k) => {
+        const v = recordData[k];
+        return v != null && v !== "" && !(Array.isArray(v) && v.length === 0);
+      });
+      const process = await findMatchingProcess(
+        tx,
+        { organizationId: ctx.organizationId, module: INVENTORY_MODULE, submodule },
+        "CREATE",
+        normalized,
+        { changedKeys, fieldSections: inventoryApprovalAdapter.fieldSections(submodule) },
+      );
+      if (!process) return created;
+
+      const { approvalMeta } = await submitForApproval(tx, {
+        organizationId: ctx.organizationId,
+        module: INVENTORY_MODULE,
+        submodule,
+        recordId: created.id,
+        requestedById: ctx.userId,
+        trigger: "CREATE",
+        process,
+        priorStatus: userStatus,
+      });
+      return tx.inventoryRecord.update({
+        where: { id: created.id },
+        data: { data: { ...recordData, _approval: approvalMeta } as any, status: PENDING_STATUS },
+      });
+    }, APPROVAL_TX_OPTS);
     return toRecord(row);
   },
 
@@ -476,29 +555,107 @@ export const InventoryHandlers = {
       where: { id, organizationId: ctx.organizationId },
     });
     if (!existing) throw new Error("Item not found");
-    const merged = { ...(existing.data as Record<string, unknown>), ...stripReserved(patch || {}) };
+
+    // A record awaiting approval is read-only: only an admin may force-edit it;
+    // everyone else must recall the pending request first.
+    const isPending = existing.status === PENDING_STATUS;
+    if (isPending && !(await isOrgAdmin(ctx.userId))) throw new ApprovalLockedError();
+
+    const existingData = (existing.data as Record<string, unknown>) ?? {};
+    const cleanPatch = stripReserved(patch || {});
+
+    // Section-restricted fields may only be CHANGED by their grantees
+    // (re-saving the full form bag with untouched values passes).
+    await assertSectionEditsAllowed({
+      userId: ctx.userId,
+      organizationId: ctx.organizationId,
+      module: "inventory",
+      submodule,
+      existing: existingData,
+      patch: cleanPatch,
+    });
+
+    const merged = { ...existingData, ...cleanPatch };
+
+    // Admin force-edit while pending: persist the data change but keep the record
+    // pending (don't open a second request, don't un-lock it).
+    if (isPending) {
+      const row = await prisma.inventoryRecord.update({
+        where: { id },
+        data: { data: merged as any, status: PENDING_STATUS },
+      });
+      return toRecord(row);
+    }
+
+    // Does an EDIT approval process intercept this change? If so, PARK the patch
+    // (record keeps its old values + a pending marker) until approved.
+    const normalized = await inventoryApprovalAdapter.canonicalizeData(ctx.organizationId, submodule, merged);
+    const changedKeys = Object.keys(cleanPatch).filter(
+      (k) => String(cleanPatch[k] ?? "") !== String(existingData[k] ?? ""),
+    );
+    const process = await findMatchingProcess(
+      prisma,
+      { organizationId: ctx.organizationId, module: INVENTORY_MODULE, submodule },
+      "EDIT",
+      normalized,
+      { changedKeys, fieldSections: inventoryApprovalAdapter.fieldSections(submodule) },
+    );
+    if (process) {
+      const row = await prisma.$transaction(async (tx) => {
+        const { approvalMeta } = await submitForApproval(tx, {
+          organizationId: ctx.organizationId,
+          module: INVENTORY_MODULE,
+          submodule,
+          recordId: id,
+          requestedById: ctx.userId,
+          trigger: "EDIT",
+          process,
+          pendingPatch: cleanPatch,
+          prePatchData: existingData,
+          priorStatus: (existingData.status as string) ?? null,
+        });
+        return tx.inventoryRecord.update({
+          where: { id },
+          data: { data: { ...existingData, _approval: approvalMeta } as any, status: PENDING_STATUS },
+        });
+      }, APPROVAL_TX_OPTS);
+      return toRecord(row);
+    }
+
+    // No approval needed — apply as before, dropping any stale terminal marker
+    // (a prior APPROVED/REJECTED/RECALLED _approval) left on the record.
+    const nextData = { ...merged };
+    const marker = nextData._approval as ApprovalMeta | undefined;
+    if (marker && marker.status !== "PENDING") delete nextData._approval;
     const row = await prisma.inventoryRecord.update({
       where: { id },
-      data: { data: merged as any, status: (merged.status as string) ?? null },
+      data: { data: nextData as any, status: (merged.status as string) ?? null },
     });
     return toRecord(row);
   },
 
   async deleteItem(ctx: InvCtx, id: string): Promise<{ id: string }> {
     await requireInventoryPermission(ctx.userId, DELETE_INVENTORY_ITEM);
-    await prisma.inventoryRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
+    await prisma.$transaction(async (tx) => {
+      await cancelOpenRequestsForRecords(tx, ctx.organizationId, [id], ctx.userId);
+      await tx.inventoryRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
+    }, APPROVAL_TX_OPTS);
     return { id };
   },
 
-  /** Delete many items in ONE statement (org-scoped). Returns how many rows
-   *  were actually removed. */
+  /** Delete many items (org-scoped), cancelling any open approval requests first.
+   *  Returns how many rows were actually removed. */
   async bulkDelete(ctx: InvCtx, ids: string[]): Promise<{ count: number }> {
     if (!Array.isArray(ids) || ids.length === 0) return { count: 0 };
     await requireInventoryPermission(ctx.userId, DELETE_INVENTORY_ITEM);
-    const res = await prisma.inventoryRecord.deleteMany({
-      where: { id: { in: ids }, organizationId: ctx.organizationId },
-    });
-    return { count: res.count };
+    const count = await prisma.$transaction(async (tx) => {
+      await cancelOpenRequestsForRecords(tx, ctx.organizationId, ids, ctx.userId);
+      const res = await tx.inventoryRecord.deleteMany({
+        where: { id: { in: ids }, organizationId: ctx.organizationId },
+      });
+      return res.count;
+    }, APPROVAL_TX_OPTS);
+    return { count };
   },
 
   // ── Goods movements (Inward / Outward) ──

@@ -306,7 +306,7 @@ export const PR_SCHEMA: SubmoduleSchema = {
   fields: [
     { key: "docNo", label: "PR No.", type: "text", section: "Requisition", auto: true, inTable: true, pinned: true, width: 120 },
     { key: "docDate", label: "PR Date", type: "date", section: "Requisition", inTable: true, width: 120 },
-    { key: "department", label: "Department", type: "master", master: "department", section: "Requisition", prefillUser: "department", inTable: true, width: 140 },
+    { key: "department", label: "Department", type: "master", master: "department", section: "Requisition", prefillUser: "department", required: true, inTable: true, width: 140 },
     { key: "requestedBy", label: "Requested By", type: "text", section: "Requisition", prefillUser: "name", inTable: true, width: 150 },
     { key: "priority", label: "Priority", type: "master", master: "priority", section: "Requisition", inTable: true, width: 110 },
     // Procurement route — NEW items go through sourcing & supplier selection;
@@ -330,18 +330,21 @@ export const PR_SCHEMA: SubmoduleSchema = {
     { key: "items", label: "Items", type: "lineItems", section: "Item Details", rowNoun: "Item", addLabel: "Add item", columns: [
       { key: "itemName", label: "Item", type: "text", section: "line", required: true },
       { key: "itemDescription", label: "Description", type: "text", section: "line" },
-      { key: "category", label: "Category", type: "master", master: "category", section: "line" },
-      { key: "uom", label: "UOM", type: "master", master: "uom", section: "line" },
-      { key: "quantity", label: "Qty", type: "number", section: "line", defaultValue: 0 },
+      { key: "category", label: "Category", type: "master", master: "category", section: "line", required: true },
+      { key: "uom", label: "UOM", type: "master", master: "uom", section: "line", required: true },
+      { key: "quantity", label: "Qty", type: "number", section: "line", defaultValue: 0, required: true },
     ] },
-    { key: "requiredBy", label: "Required By", type: "date", section: "Item Details", inTable: true, width: 130 },
-    { key: "purpose", label: "Purpose", type: "text", section: "Item Details", inTable: true, width: 180, placeholder: "Reason for requisition" },
+    { key: "requiredBy", label: "Required By", type: "date", section: "Item Details", required: true, inTable: true, width: 130 },
+    { key: "purpose", label: "Purpose", type: "text", section: "Item Details", required: true, inTable: true, width: 180, placeholder: "Reason for requisition" },
 
     { key: "preferredSupplier", label: "Preferred Vendor", type: "master", master: "supplier", section: "Procurement Route", inTable: true, defaultHidden: true, width: 170 },
     { key: "lastRate", label: "Last Rate", type: "currency", section: "Procurement Route", defaultValue: 0, inTable: true, defaultHidden: true, width: 120, align: "right" },
     { key: "lastPoRef", label: "Last PO Ref.", type: "text", section: "Procurement Route", inTable: true, defaultHidden: true, width: 130 },
 
     { key: "productionApproval", label: "Production Approval", type: "select", options: APPROVAL_OPTS, defaultValue: "PENDING", section: "Approval", inTable: true, width: 150 },
+    // Recorded by the production manager while approving: where the item will
+    // be / is kept. Locked for users without the approve-requisition permission.
+    { key: "itemLocationKept", label: "Item Location Kept", type: "text", section: "Approval", inTable: true, width: 170, placeholder: "Where the item is kept" },
     { key: "remarks", label: "Remarks", type: "textarea", section: "Approval", inTable: true, width: 200 },
 
     // Requester's vendor recommendation (optional).
@@ -439,6 +442,26 @@ const GRN_INVOICE_COLUMNS: FieldDef[] = [
   },
 ];
 
+// Receipts WITHOUT a supplier invoice (against a challan / no document): flat
+// PO/PR item lines — same keys as the invoice item lines so receipt math,
+// open-PO balances and stock posting work identically. "Expected Qty" plays
+// the invoiceQty role (what the document / order says should arrive).
+const GRN_RECEIPT_ITEM_COLUMNS: FieldDef[] = GRN_INVOICE_ITEM_COLUMNS.map((c) =>
+  c.key === "invoiceQty" ? { ...c, label: "Expected Qty" } : { ...c },
+);
+
+// What the goods arrived against — drives which receipt fields open up.
+const GRN_DOC_OPTS = [
+  { value: "INVOICE", label: "Invoice" },
+  { value: "CHALLAN", label: "Challan / DC" },
+  { value: "NO_INVOICE", label: "No Invoice" },
+];
+// Who brought the material to the gate.
+const BROUGHT_BY_OPTS = [
+  { value: "COMPANY_PERSON", label: "Company Person" },
+  { value: "OTHERS", label: "Others" },
+];
+
 export const GRN_SCHEMA: SubmoduleSchema = {
   key: "grn",
   label: "Goods Receipt (GRN)",
@@ -453,15 +476,26 @@ export const GRN_SCHEMA: SubmoduleSchema = {
     { key: "docDate", label: "GRN Date", type: "date", section: "Receipt", inTable: true, width: 130 },
     { key: "supplier", label: "Vendor", type: "master", master: "supplier", section: "Receipt", inTable: true, width: 170 },
     { key: "warehouse", label: "Warehouse", type: "master", master: "warehouse", section: "Receipt", inTable: true, width: 170 },
+    // What the goods arrived against — Invoice opens the invoice grid, Challan
+    // opens challan no./date + plain item lines, No Invoice just the item lines.
+    { key: "receivedAgainst", label: "Received Against", type: "select", options: GRN_DOC_OPTS, defaultValue: "INVOICE", section: "Receipt", inTable: true, width: 140 },
 
     // Gate entry — security/gate inward record + first-level inspection at the
     // factory gate, before QC (purchase) and store (inventory) inspection.
     { key: "gateEntryNo", label: "Gate Entry No.", type: "text", section: "Gate Entry", inTable: true, width: 130 },
     { key: "gateEntryDate", label: "Gate Entry Date", type: "date", section: "Gate Entry", inTable: true, width: 140 },
-    { key: "vehicleNo", label: "Vehicle No.", type: "text", section: "Gate Entry", inTable: true, width: 120 },
-    { key: "driverName", label: "Driver Name", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140 },
-    { key: "challanNo", label: "Challan / DC No.", type: "text", section: "Gate Entry", inTable: true, width: 130 },
-    { key: "challanDate", label: "Challan Date", type: "date", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130 },
+    // Who delivered: a company person (employee ID) or an outside party
+    // (vehicle / driver details).
+    { key: "broughtBy", label: "Material Brought By", type: "select", options: BROUGHT_BY_OPTS, defaultValue: "OTHERS", section: "Gate Entry", inTable: true, width: 150 },
+    { key: "employeeId", label: "Employee ID", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "broughtBy", equals: "COMPANY_PERSON" } },
+    { key: "vehicleNo", label: "Vehicle No.", type: "text", section: "Gate Entry", inTable: true, width: 120, showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "driverName", label: "Driver Name", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "driverMobile", label: "Driver Mobile No.", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, placeholder: "Driver contact number", showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "challanNo", label: "Challan / DC No.", type: "text", section: "Gate Entry", inTable: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
+    { key: "challanDate", label: "Challan Date", type: "date", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
+    // Guard's physical count at the gate.
+    { key: "boxCount", label: "Box Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
+    { key: "partCount", label: "Part Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
     { key: "gateInspection", label: "Gate Entry Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Gate Entry", inTable: true, width: 170 },
     { key: "gateInspectionMedia", label: "Gate Entry Inspection — Photos / Video", type: "media", section: "Gate Entry", inTable: true, width: 130 },
 
@@ -473,7 +507,9 @@ export const GRN_SCHEMA: SubmoduleSchema = {
     // Multiple invoices on one GRN; each invoice covers multiple PO / PR item
     // lines with Full / Partial receipt and a balance for the remainder.
     // Placed under the inspections so quantities are booked after QC.
-    { key: "lines", label: "Invoices", type: "lineItems", columns: GRN_INVOICE_COLUMNS, rowNoun: "Invoice", addLabel: "Add invoice", section: "Invoices", inTable: true, width: 160 },
+    { key: "lines", label: "Invoices", type: "lineItems", columns: GRN_INVOICE_COLUMNS, rowNoun: "Invoice", addLabel: "Add invoice", section: "Receipt Lines", inTable: true, width: 160, showIf: { field: "receivedAgainst", equals: "INVOICE" } },
+    // Challan / no-invoice receipts book their quantities as flat item lines.
+    { key: "receiptLines", label: "Received Items", type: "lineItems", columns: GRN_RECEIPT_ITEM_COLUMNS, rowNoun: "Item line", addLabel: "Add PO / PR line", section: "Receipt Lines", inTable: true, defaultHidden: true, width: 160, showIf: { field: "receivedAgainst", in: ["CHALLAN", "NO_INVOICE"] } },
 
     // Auto-derived from the invoice/received quantities above — read-only.
     { key: "receiptStatus", label: "Receipt Status", type: "status", statusOptions: RECEIPT_STATUS, defaultValue: "PENDING", computed: true, section: "Posting", inTable: true, width: 170 },

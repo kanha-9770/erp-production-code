@@ -67,3 +67,32 @@ export function deriveStockStatus(item: InventoryItem): ItemStatus {
 export const STATUS_OPTIONS: Array<{ value: ItemStatus; label: string }> = (
   ["ACTIVE", "LOW_STOCK", "OUT_OF_STOCK", "INACTIVE"] as ItemStatus[]
 ).map((value) => ({ value, label: STATUS_LABEL[value] }));
+
+// ── Approval state (from the server-written `_approval` marker) ──────────────
+
+export type ApprovalState = "PENDING" | "APPROVED" | "REJECTED" | "RECALLED";
+
+export interface ItemApprovalMeta {
+  requestId: string;
+  status: ApprovalState;
+  processName?: string;
+  stage?: number;
+  totalStages?: number;
+  comment?: string;
+  decidedAt?: string;
+  submittedAt?: string;
+}
+
+/** Read the approval marker an item carries (set exclusively by the server). */
+export function getApprovalMeta(item: InventoryItem): ItemApprovalMeta | null {
+  const a = item._approval as ItemApprovalMeta | undefined;
+  return a && typeof a === "object" && a.status ? a : null;
+}
+
+/** Badge label/variant for the approval states worth flagging in lists/forms. */
+export const APPROVAL_BADGE: Record<ApprovalState, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+  PENDING: { label: "Pending Approval", variant: "outline" },
+  APPROVED: { label: "Approved", variant: "default" },
+  REJECTED: { label: "Rejected", variant: "destructive" },
+  RECALLED: { label: "Recalled", variant: "secondary" },
+};

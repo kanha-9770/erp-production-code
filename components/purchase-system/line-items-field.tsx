@@ -99,19 +99,21 @@ export function LineItemsField({
       rows.map((r, i) => {
         if (i !== idx) return r;
         const next: Row = { ...r, [key]: val };
-        // Picking a PO prefills the line from the order: PR, item, and the
-        // remaining balance as the default invoice/received qty + amount.
-        // Only blank/zero fields are filled, so manual edits are never clobbered.
+        // Picking a PO AUTHORITATIVELY fills the whole line from that order — PR
+        // ref, item name, and the remaining balance as the invoice/received qty
+        // + amount — so the receiver never re-types. (Adjust the received qty
+        // afterwards for a partial receipt; re-picking re-syncs from the PO.)
         if (key === "poRef") {
-          const trace = getPoTrace(String(val ?? ""));
+          const ref = String(val ?? "").trim();
+          const trace = ref ? getPoTrace(ref) : { found: false };
           if (trace.found) {
-            if (trace.prRef && !String(next.prRef ?? "").trim()) next.prRef = trace.prRef;
-            if (trace.itemName && !String(next.itemName ?? "").trim()) next.itemName = trace.itemName;
+            next.prRef = trace.prRef ?? next.prRef ?? "";
+            next.itemName = trace.itemName ?? "";
             const bal = trace.balance ?? 0;
             if (bal > 0) {
-              if (!Number(next.invoiceQty)) next.invoiceQty = bal;
-              if (!Number(next.receivedQty)) next.receivedQty = bal;
-              if (!Number(next.amount) && trace.rate) next.amount = Number((bal * trace.rate).toFixed(2));
+              next.invoiceQty = bal;
+              next.receivedQty = bal;
+              next.amount = trace.rate ? Number((bal * trace.rate).toFixed(2)) : (Number(next.amount) || 0);
             }
           }
         }

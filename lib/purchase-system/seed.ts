@@ -35,8 +35,8 @@ const PO_SEED: Array<Record<string, unknown>> = [
 
 const GRN_SEED: Array<Record<string, unknown>> = [
   {
-    docNo: "GRN-0001", docDate: "2026-05-19", supplier: "Nessco Fasteners", warehouse: "JAIPUR WAREHOUSE",
-    gateEntryNo: "GE-0451", gateEntryDate: "2026-05-19", vehicleNo: "RJ14 GC 2231", driverName: "Ramesh", challanNo: "DC-8841", challanDate: "2026-05-18", gateInspection: "PASSED",
+    docNo: "GRN-0001", docDate: "2026-05-19", supplier: "Nessco Fasteners", warehouse: "JAIPUR WAREHOUSE", receivedAgainst: "INVOICE",
+    gateEntryNo: "GE-0451", gateEntryDate: "2026-05-19", broughtBy: "OTHERS", vehicleNo: "RJ14 GC 2231", driverName: "Ramesh", challanNo: "DC-8841", challanDate: "2026-05-18", boxCount: 4, partCount: 120, gateInspection: "PASSED",
     lines: [
       {
         _id: "inv_s1a", invoiceNo: "INV-NF-3321", invoiceDate: "2026-05-18",
@@ -55,8 +55,8 @@ const GRN_SEED: Array<Record<string, unknown>> = [
     receiptStatus: "PARTIAL", purchaseInspection: "PASSED", inventoryInspection: "PASSED", stockUpdated: "YES", status: "STOCK_UPDATED",
   },
   {
-    docNo: "GRN-0002", docDate: "2026-05-16", supplier: "Apex Pneumatics", warehouse: "MUMBAI WAREHOUSE",
-    gateEntryNo: "GE-0452", gateEntryDate: "2026-05-16", vehicleNo: "MH12 AB 9087", driverName: "Suresh", challanNo: "DC-2210", challanDate: "2026-05-15", gateInspection: "PASSED",
+    docNo: "GRN-0002", docDate: "2026-05-16", supplier: "Apex Pneumatics", warehouse: "MUMBAI WAREHOUSE", receivedAgainst: "INVOICE",
+    gateEntryNo: "GE-0452", gateEntryDate: "2026-05-16", broughtBy: "OTHERS", vehicleNo: "MH12 AB 9087", driverName: "Suresh", challanNo: "DC-2210", challanDate: "2026-05-15", boxCount: 2, partCount: 36, gateInspection: "PASSED",
     lines: [
       {
         _id: "inv_s2a", invoiceNo: "INV-AP-1180", invoiceDate: "2026-05-15",

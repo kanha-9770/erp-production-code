@@ -14,6 +14,7 @@ import type {
   InventoryMovement,
   InventorySnapshot,
   MasterType,
+  SectionAccess,
   SubmoduleKey,
 } from "./types";
 
@@ -82,6 +83,11 @@ export const inventoryService = {
   /** Just the master registry — the provider's cheap mount-time load. */
   loadMasters(): Promise<MasterType[]> {
     return api<MasterType[]>(`${BASE}/masters`);
+  },
+
+  /** Just the logged-in user's per-form-section edit access (cheap; no records). */
+  loadPermissions(): Promise<{ sectionAccess: SectionAccess }> {
+    return api<{ sectionAccess: SectionAccess }>(`${BASE}/permissions`);
   },
 
   /** One paginated, server-filtered/sorted page of a submodule. */

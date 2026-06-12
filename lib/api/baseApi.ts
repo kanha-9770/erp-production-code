@@ -134,6 +134,12 @@ export const baseApi = createApi({
     // Inventory (Module #3)
     "InventoryProducts",
     "InventoryProduct",
+    // Approval Process (Zoho-style approvals — module-aware: inventory, purchase, …)
+    "ApprovalProcesses",
+    "ApprovalProcess",
+    "ApprovalInbox",
+    "ApprovalRequests",
+    "ApprovalRequest",
     // Plan Designer + Settings + Team (Phase 4)
     "CompPlans",
     "RebmSettings",

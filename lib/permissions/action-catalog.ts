@@ -17,13 +17,17 @@ import {
   APPROVE_PURCHASE_ORDER,
   POST_GRN_STOCK,
   RAISE_PAYMENT_REQUEST,
+  APPROVE_PAYMENT_REQUEST,
   PROCESS_PURCHASE,
+  MANAGE_PURCHASE_APPROVAL_PROCESS,
 } from "@/lib/permissions/purchase-permissions";
 import {
   POST_INVENTORY_MOVEMENT,
   DELETE_INVENTORY_ITEM,
   RESET_INVENTORY_DATA,
+  MANAGE_INVENTORY_APPROVAL_PROCESS,
 } from "@/lib/permissions/inventory-permissions";
+import { SECTION_ACTION_GROUPS } from "@/lib/permissions/section-catalog";
 
 export interface ActionPermissionDef {
   /** Named permission constant (matches a Permission.name row). */
@@ -76,9 +80,21 @@ export const ACTION_CATALOG: ActionModuleGroup[] = [
         enforced: true,
       },
       {
+        name: APPROVE_PAYMENT_REQUEST,
+        label: "Approve Payment Request",
+        description: "Approve, hold, reject or mark-paid a payment request.",
+        enforced: true,
+      },
+      {
         name: PROCESS_PURCHASE,
         label: "Process Purchase (Buyer)",
         description: "Raise RFQs, create/convert POs, manage suppliers, edit & delete purchase docs.",
+        enforced: true,
+      },
+      {
+        name: MANAGE_PURCHASE_APPROVAL_PROCESS,
+        label: "Manage Approval Processes",
+        description: "Configure purchase approval processes (Settings → Purchase Approvals).",
         enforced: true,
       },
     ],
@@ -104,6 +120,12 @@ export const ACTION_CATALOG: ActionModuleGroup[] = [
         name: RESET_INVENTORY_DATA,
         label: "Reset Inventory Data",
         description: "Wipe and reseed all inventory data.",
+        enforced: true,
+      },
+      {
+        name: MANAGE_INVENTORY_APPROVAL_PROCESS,
+        label: "Manage Approval Processes",
+        description: "Configure inventory approval processes (Settings → Inventory Approvals).",
         enforced: true,
       },
     ],
@@ -140,6 +162,10 @@ export const ACTION_CATALOG: ActionModuleGroup[] = [
       },
     ],
   },
+  // Per-form-section edit access (purchase + inventory forms). Generated from
+  // the form schemas — one group (card) per form, one column per section.
+  // Sections are open until granted; see lib/permissions/section-catalog.ts.
+  ...SECTION_ACTION_GROUPS,
 ];
 
 /** Flat list of every catalogued permission (for ensure + lookups). */

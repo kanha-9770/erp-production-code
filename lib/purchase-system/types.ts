@@ -172,12 +172,23 @@ export interface PurchasePermissions {
   postStock: boolean;
   /** May raise a payment request. */
   raisePayment: boolean;
+  /** May approve / reject / mark-paid a payment request (set its status). */
+  approvePayment: boolean;
   /**
    * Buyer/processor capability: create & convert sourcing/POs, manage suppliers,
    * edit and delete purchase documents (the promote chain + edit/delete buttons).
    */
   process: boolean;
 }
+
+/**
+ * Per-form-section edit access for the logged-in user, keyed
+ * submodule → section name → may-edit. A section is open (true) unless an
+ * admin has granted its section permission to at least one role/user on the
+ * Approvals page — from then on only grantees (and admins) may edit its
+ * fields. UI gating only; the server re-checks every write.
+ */
+export type SectionAccess = Record<PurchaseSubmoduleKey, Record<string, boolean>>;
 
 export interface PurchaseSnapshot {
   version: number;
@@ -187,6 +198,8 @@ export interface PurchaseSnapshot {
   currentUser: CurrentUserIdentity;
   /** The requesting user's privileged-action flags (UI gating). */
   permissions: PurchasePermissions;
+  /** The requesting user's per-form-section edit access (UI gating). */
+  sectionAccess?: SectionAccess;
 }
 
 /** Result of posting a GRN's received quantities into Store Inventory. */

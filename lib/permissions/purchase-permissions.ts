@@ -19,14 +19,17 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions/has-permission";
+import { hasPermission, isOrgAdmin } from "@/lib/permissions/has-permission";
+import { buildRoleParentMap, isDescendantRole } from "@/lib/approvals/engine";
 import type { PurchasePermissions } from "@/lib/purchase-system/types";
 
 export const APPROVE_PURCHASE_REQUISITION = "APPROVE_PURCHASE_REQUISITION";
 export const APPROVE_PURCHASE_ORDER = "APPROVE_PURCHASE_ORDER";
 export const POST_GRN_STOCK = "POST_GRN_STOCK";
 export const RAISE_PAYMENT_REQUEST = "RAISE_PAYMENT_REQUEST";
+export const APPROVE_PAYMENT_REQUEST = "APPROVE_PAYMENT_REQUEST";
 export const PROCESS_PURCHASE = "PROCESS_PURCHASE";
+export const MANAGE_PURCHASE_APPROVAL_PROCESS = "MANAGE_PURCHASE_APPROVAL_PROCESS";
 
 /**
  * The single guarded field per submodule and the permission that gates it. One
@@ -36,7 +39,45 @@ export const GUARDED_FIELDS: Record<string, { field: string; permission: string 
   pr: { field: "productionApproval", permission: APPROVE_PURCHASE_REQUISITION },
   po: { field: "approvalStatus", permission: APPROVE_PURCHASE_ORDER },
   grn: { field: "stockUpdated", permission: POST_GRN_STOCK },
+  // Payment status on CREATE / import: minting a payment already past REQUESTED
+  // (incl. pre-PAID) is an approver-level back-door, so it needs APPROVE_PAYMENT_
+  // REQUEST. The UPDATE path is finer-grained — see paymentStatusPermission()
+  // (PAID → account manager; approve/hold/reject → approver).
+  payment: { field: "status", permission: APPROVE_PAYMENT_REQUEST },
 };
+
+/**
+ * Plain (non-status) fields only an approver may fill. Unlike GUARDED_FIELDS —
+ * where only a "decided" value (APPROVED/REJECTED/YES) is privileged — ANY change
+ * to these needs the permission. The PR's "Item Location Kept" is recorded by the
+ * production manager at approval time, so it's reserved to the same approver who
+ * sets Production Approval (APPROVE_PURCHASE_REQUISITION).
+ */
+export const APPROVER_ONLY_FIELDS: Record<string, { fields: string[]; permission: string }> = {
+  pr: { fields: ["itemLocationKept"], permission: APPROVE_PURCHASE_REQUISITION },
+};
+
+/**
+ * The permission an approver-only field demands when `next` changes it vs `base`
+ * (or, on create where base is null, when it's set to a non-empty value). Returns
+ * null when no such field is touched.
+ */
+function approverOnlyPermission(
+  submodule: string,
+  base: Record<string, unknown> | null,
+  next: Record<string, unknown>,
+): string | null {
+  const a = APPROVER_ONLY_FIELDS[submodule];
+  if (!a) return null;
+  for (const f of a.fields) {
+    if (!Object.prototype.hasOwnProperty.call(next, f)) continue;
+    const changed = base
+      ? String(next[f] ?? "") !== String(base[f] ?? "")
+      : String(next[f] ?? "").trim() !== "";
+    if (changed) return a.permission;
+  }
+  return null;
+}
 
 /** Does this flag set permit the named permission? */
 function permitted(permission: string, perms: PurchasePermissions): boolean {
@@ -47,9 +88,88 @@ function permitted(permission: string, perms: PurchasePermissions): boolean {
       return perms.approvePo;
     case POST_GRN_STOCK:
       return perms.postStock;
+    case APPROVE_PAYMENT_REQUEST:
+      return perms.approvePayment;
     default:
       return false;
   }
+}
+
+// ── Role-hierarchy gate for approvals (org opt-in) ──────────────────────────
+
+/** Active role ids a user currently holds (role + unit both active). */
+async function activeRoleIds(userId: string): Promise<string[]> {
+  const rows = await prisma.userUnitAssignment.findMany({
+    where: { userId, role: { isActive: true }, unit: { isActive: true } },
+    select: { roleId: true },
+  });
+  return [...new Set(rows.map((r) => r.roleId))];
+}
+
+/**
+ * Org opt-in flag (Organization.setup.approvals.purchaseHierarchyScoped — no
+ * migration). When true, a guarded approval (e.g. a PR's Production Approval)
+ * may only be applied by someone who sits ABOVE the record's creator in the role
+ * tree — so a department head approves their own team's documents, never another
+ * department's. Off by default (blanket permission, as before).
+ */
+export async function purchaseHierarchyEnforced(organizationId: string): Promise<boolean> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { setup: true },
+  });
+  const setup = (org?.setup ?? {}) as { approvals?: { purchaseHierarchyScoped?: boolean } };
+  return setup.approvals?.purchaseHierarchyScoped === true;
+}
+
+/**
+ * Org opt-in (Organization.setup.approvals.engineOnly — no migration). When true,
+ * the approval-PROCESS engine (lib/approvals) is the SOLE approval gate for
+ * purchase: the legacy named-permission FIELD gating (productionApproval /
+ * approvalStatus / payment status) is skipped, so a field with NO configured
+ * approval process is freely editable, and ALL approval control comes from the
+ * approval-process pages. GRN stock-posting (POST_GRN_STOCK) is unaffected — it
+ * triggers a real inventory write, not a field approval. Off by default.
+ */
+export async function approvalsEngineOnly(organizationId: string): Promise<boolean> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { setup: true },
+  });
+  const setup = (org?.setup ?? {}) as { approvals?: { engineOnly?: boolean } };
+  return setup.approvals?.engineOnly === true;
+}
+
+/** Thrown when an approver acts on a document outside their role hierarchy (403). */
+export class PurchaseHierarchyError extends Error {
+  readonly forbidden = true;
+  constructor(
+    message = "You can only approve documents raised by your own team — this one was raised outside your role hierarchy.",
+  ) {
+    super(message);
+    this.name = "PurchaseHierarchyError";
+  }
+}
+
+/**
+ * Enforce role-hierarchy on a guarded approval: the acting user must hold a role
+ * that is a strict ANCESTOR of one of the record creator's roles (the creator is
+ * their subordinate). Admins/owners bypass. Callers gate this on
+ * {@link purchaseHierarchyEnforced} so it's a no-op unless the org opted in.
+ */
+export async function assertApprovalWithinHierarchy(args: {
+  actingUserId: string;
+  creatorId: string | null;
+  organizationId: string;
+}): Promise<void> {
+  if (await isOrgAdmin(args.actingUserId)) return;
+  const [actorRoles, creatorRoles, parentById] = await Promise.all([
+    activeRoleIds(args.actingUserId),
+    args.creatorId ? activeRoleIds(args.creatorId) : Promise.resolve<string[]>([]),
+    buildRoleParentMap(prisma, args.organizationId),
+  ]);
+  const ok = creatorRoles.some((cr) => actorRoles.some((ar) => isDescendantRole(cr, ar, parentById)));
+  if (!ok) throw new PurchaseHierarchyError();
 }
 
 /** Source of truth for the purchase permissions, used by seed + grant tooling. */
@@ -79,13 +199,25 @@ export const PURCHASE_PERMISSIONS: ReadonlyArray<{
   {
     name: RAISE_PAYMENT_REQUEST,
     description:
-      "Raise a payment request against a PO/GRN. Grant to accounts-payable / purchase roles.",
+      "Raise a payment request against a PO/GRN, and mark an approved request as PAID. Grant to accounts-payable / account-manager roles.",
+    resource: "purchase",
+  },
+  {
+    name: APPROVE_PAYMENT_REQUEST,
+    description:
+      "Approve, hold or reject a payment request (the approval decision). Marking it PAID is the account manager's RAISE_PAYMENT_REQUEST. Grant to finance-approver / admin roles.",
     resource: "purchase",
   },
   {
     name: PROCESS_PURCHASE,
     description:
       "Buyer: raise RFQs, create/convert purchase orders, manage suppliers, and edit/delete purchase documents.",
+    resource: "purchase",
+  },
+  {
+    name: MANAGE_PURCHASE_APPROVAL_PROCESS,
+    description:
+      "Create, edit, activate and delete purchase approval processes (Settings → Purchase Approvals). Grant to purchase/admin roles.",
     resource: "purchase",
   },
 ];
@@ -150,20 +282,41 @@ export async function requirePurchasePermission(
 export async function getPurchasePermissions(
   userId: string,
 ): Promise<PurchasePermissions> {
-  const [approveRequisition, approvePo, postStock, raisePayment, process] = await Promise.all([
-    hasPermission(userId, APPROVE_PURCHASE_REQUISITION),
-    hasPermission(userId, APPROVE_PURCHASE_ORDER),
-    hasPermission(userId, POST_GRN_STOCK),
-    hasPermission(userId, RAISE_PAYMENT_REQUEST),
-    hasPermission(userId, PROCESS_PURCHASE),
-  ]);
-  return { approveRequisition, approvePo, postStock, raisePayment, process };
+  const [approveRequisition, approvePo, postStock, raisePayment, approvePayment, process] =
+    await Promise.all([
+      hasPermission(userId, APPROVE_PURCHASE_REQUISITION),
+      hasPermission(userId, APPROVE_PURCHASE_ORDER),
+      hasPermission(userId, POST_GRN_STOCK),
+      hasPermission(userId, RAISE_PAYMENT_REQUEST),
+      hasPermission(userId, APPROVE_PAYMENT_REQUEST),
+      hasPermission(userId, PROCESS_PURCHASE),
+    ]);
+  return { approveRequisition, approvePo, postStock, raisePayment, approvePayment, process };
 }
 
 /** A guarded field set to a "decided"/privileged value (not the benign default). */
 function isPrivilegedValue(field: string, v: unknown): boolean {
   const s = String(v ?? "").trim().toUpperCase();
-  return field === "stockUpdated" ? s === "YES" : s === "APPROVED" || s === "REJECTED";
+  if (field === "stockUpdated") return s === "YES";
+  // Payment status: anything past the initial "REQUESTED" is privileged.
+  if (field === "status") return ["APPROVED", "REJECTED", "PAID", "ON_HOLD"].includes(s);
+  return s === "APPROVED" || s === "REJECTED";
+}
+
+/**
+ * A payment request's `status` splits by TARGET value: the approval DECISIONS
+ * (Approved / On Hold / Rejected) are reserved to the approver (`APPROVE_PAYMENT_
+ * REQUEST` — admin / a given user), while marking a payment PAID is the account
+ * manager's job (`RAISE_PAYMENT_REQUEST` — the same role that raised it, paying
+ * out only AFTER it's approved). Returns the permission a target value demands,
+ * or null for the benign "REQUESTED" default. One source of truth for the form
+ * lock, the preview buttons and the server gate.
+ */
+export function paymentStatusPermission(value: unknown): string | null {
+  const s = String(value ?? "").trim().toUpperCase();
+  if (s === "PAID") return RAISE_PAYMENT_REQUEST;
+  if (s === "APPROVED" || s === "ON_HOLD" || s === "REJECTED") return APPROVE_PAYMENT_REQUEST;
+  return null;
 }
 
 /**
@@ -177,8 +330,9 @@ export function guardedPermissionForCreate(
   data: Record<string, unknown>,
 ): string | null {
   const g = GUARDED_FIELDS[submodule];
-  if (!g) return null;
-  return isPrivilegedValue(g.field, data[g.field]) ? g.permission : null;
+  if (g && isPrivilegedValue(g.field, data[g.field])) return g.permission;
+  // An approver-only field pre-filled on create is the same back-door.
+  return approverOnlyPermission(submodule, null, data);
 }
 
 /**
@@ -201,6 +355,13 @@ export function sanitizePurchaseImport(
   ) {
     delete data[g.field];
   }
+  // Approver-only plain fields (PR Item Location Kept) get the same treatment.
+  const a = APPROVER_ONLY_FIELDS[submodule];
+  if (a && !permitted(a.permission, perms)) {
+    for (const f of a.fields) {
+      if (Object.prototype.hasOwnProperty.call(data, f)) delete data[f];
+    }
+  }
   return data;
 }
 
@@ -217,12 +378,24 @@ export function guardedPermissionForPatch(
   existing: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): string | null {
+  // Payment status splits by target value (PAID → account manager; approve/hold/
+  // reject → approver), so it needs its own resolver, not the single-permission
+  // GUARDED_FIELDS entry.
+  if (submodule === "payment") {
+    const changed =
+      Object.prototype.hasOwnProperty.call(patch, "status") &&
+      String(patch.status ?? "") !== String(existing.status ?? "");
+    return changed ? paymentStatusPermission(patch.status) : null;
+  }
   const g = GUARDED_FIELDS[submodule];
-  if (!g) return null;
-  const changed =
-    Object.prototype.hasOwnProperty.call(patch, g.field) &&
-    String(patch[g.field] ?? "") !== String(existing[g.field] ?? "");
-  return changed ? g.permission : null;
+  if (g) {
+    const changed =
+      Object.prototype.hasOwnProperty.call(patch, g.field) &&
+      String(patch[g.field] ?? "") !== String(existing[g.field] ?? "");
+    if (changed) return g.permission;
+  }
+  // …or an approver-only plain field (e.g. the PR's Item Location Kept) changed.
+  return approverOnlyPermission(submodule, existing, patch);
 }
 
 /**

@@ -31,12 +31,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, ImagePlus, Loader2, X } from "lucide-react";
+import { Plus, ImagePlus, Loader2, Lock, X, Info, Undo2, RotateCcw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useInventory } from "@/lib/inventory-system/store";
-import { STATUS_OPTIONS } from "@/lib/inventory-system/format";
+import { STATUS_OPTIONS, getApprovalMeta, APPROVAL_BADGE } from "@/lib/inventory-system/format";
 import { fileToResizedDataUrl } from "@/lib/inventory-system/image";
 import { useToast } from "@/hooks/use-toast";
+import {
+  useRecallApprovalRequestMutation,
+  useResubmitApprovalMutation,
+} from "@/lib/api/approvals";
 import type { FieldDef, InventoryItem, SubmoduleSchema } from "@/lib/inventory-system/types";
 
 interface ItemFormSheetProps {
@@ -58,9 +63,51 @@ function buildInitial(schema: SubmoduleSchema, item: InventoryItem | null): Reco
 }
 
 export function ItemFormSheet({ schema, open, item, onOpenChange, onSubmit }: ItemFormSheetProps) {
-  const { getMasterOptions, addMasterOption } = useInventory();
+  const { getMasterOptions, addMasterOption, sectionAccess, bumpRevalidate } = useInventory();
+  const { toast } = useToast();
   const [form, setForm] = useState<Record<string, unknown>>(() => buildInitial(schema, item));
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [recall, { isLoading: recalling }] = useRecallApprovalRequestMutation();
+  const [resubmit, { isLoading: resubmitting }] = useResubmitApprovalMutation();
+
+  // Approval state the record carries (server-written `_approval` marker).
+  const approval = item ? getApprovalMeta(item) : null;
+  const pending = approval?.status === "PENDING";
+  const rejected = approval?.status === "REJECTED";
+
+  // Section-level edit access: a section an admin restricted (granted to
+  // specific roles/users) renders read-only for everyone else. Mirrors
+  // assertSectionEditsAllowed in lib/permissions/section-permissions.ts. A
+  // pending-approval record is fully locked until approved/recalled.
+  const sectionLocked = (section: string): boolean =>
+    pending || sectionAccess?.[schema.key]?.[section] === false;
+
+  const handleRecall = async () => {
+    if (!approval?.requestId) return;
+    try {
+      await recall({ id: approval.requestId }).unwrap();
+      toast({ title: "Request recalled", description: "The record is editable again." });
+      bumpRevalidate();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not recall", description: e?.data?.error });
+    }
+  };
+
+  const handleResubmit = async () => {
+    if (!item) return;
+    try {
+      const res: any = await resubmit({ module: "inventory", recordId: item.id }).unwrap();
+      toast({
+        title: res?.data?.resubmitted ? "Resubmitted for approval" : "Record is live (no matching process)",
+      });
+      bumpRevalidate();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not resubmit", description: e?.data?.error });
+    }
+  };
 
   // Re-seed the form whenever the sheet opens for a different item.
   useEffect(() => {
@@ -92,6 +139,9 @@ export function ItemFormSheet({ schema, open, item, onOpenChange, onSubmit }: It
     const next: Record<string, string> = {};
     for (const f of schema.fields) {
       if (!f.required) continue;
+      // Fields in a locked section render read-only — they can't be filled in,
+      // so a missing value must not block submission.
+      if (sectionLocked(f.section)) continue;
       const v = form[f.key];
       if (v == null || String(v).trim() === "") next[f.key] = `${f.label} is required`;
     }
@@ -127,33 +177,87 @@ export function ItemFormSheet({ schema, open, item, onOpenChange, onSubmit }: It
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-7">
-          {sections.map((section) => (
-            <div key={section.name} className="space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {section.name}
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {section.fields.map((f) => (
-                  <FieldControl
-                    key={f.key}
-                    field={f}
-                    value={form[f.key]}
-                    error={errors[f.key]}
-                    onChange={(v) => set(f.key, v)}
-                    getMasterOptions={getMasterOptions}
-                    onAddMasterOption={addMasterOption}
-                  />
-                ))}
+          {approval && (pending || rejected) && (
+            <div
+              className={cn(
+                "rounded-md border px-3 py-2.5 text-sm flex items-start gap-2",
+                pending
+                  ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                  : "border-destructive/40 bg-destructive/5 text-destructive",
+              )}
+            >
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="flex-1 space-y-0.5">
+                <div className="font-medium">
+                  {pending ? "Pending Approval" : "Approval Rejected"}
+                  {approval.processName ? ` · ${approval.processName}` : ""}
+                </div>
+                {pending && approval.totalStages ? (
+                  <div className="text-xs">
+                    Stage {(approval.stage ?? 0) + 1} of {approval.totalStages}. This record is read-only until approved —
+                    recall the request to edit it.
+                  </div>
+                ) : null}
+                {rejected && approval.comment ? <div className="text-xs">Reason: “{approval.comment}”. Edit and save to resubmit, or use Reapply.</div> : null}
               </div>
             </div>
-          ))}
+          )}
+          {sections.map((section) => {
+            const secLocked = sectionLocked(section.name);
+            return (
+              <div key={section.name} className="space-y-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                  {section.name}
+                  {secLocked && (
+                    <span className="inline-flex items-center gap-1 normal-case font-normal tracking-normal text-[11px]">
+                      <Lock className="h-3 w-3" /> view only — permission required
+                    </span>
+                  )}
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {section.fields.map((f) => (
+                    <FieldControl
+                      key={f.key}
+                      field={f}
+                      value={form[f.key]}
+                      error={errors[f.key]}
+                      onChange={(v) => set(f.key, v)}
+                      getMasterOptions={getMasterOptions}
+                      onAddMasterOption={addMasterOption}
+                      locked={secLocked}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <SheetFooter className="px-6 py-4 border-t flex-row justify-end gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit}>{item ? "Save changes" : `Create ${schema.itemNoun}`}</Button>
+          {pending ? (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+              <Button variant="outline" onClick={handleRecall} disabled={recalling} className="gap-1.5">
+                {recalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                Recall request
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              {rejected && (
+                <Button variant="outline" onClick={handleResubmit} disabled={resubmitting} className="gap-1.5">
+                  {resubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  Reapply
+                </Button>
+              )}
+              <Button onClick={handleSubmit}>{item ? "Save changes" : `Create ${schema.itemNoun}`}</Button>
+            </>
+          )}
         </SheetFooter>
       </SheetContent>
     </Sheet>
@@ -167,6 +271,7 @@ function FieldControl({
   onChange,
   getMasterOptions,
   onAddMasterOption,
+  locked = false,
 }: {
   field: FieldDef;
   value: unknown;
@@ -174,8 +279,19 @@ function FieldControl({
   onChange: (value: unknown) => void;
   getMasterOptions: (key: string) => Array<{ id: string; value: string }>;
   onAddMasterOption: (key: string, value: string, code?: string) => Promise<void>;
+  /** Render read-only because the user lacks permission to change this field. */
+  locked?: boolean;
 }) {
   const fullWidth = field.type === "textarea";
+  // Human-readable current value for the locked, read-only display.
+  const lockedLabel =
+    field.type === "status"
+      ? STATUS_OPTIONS.find((o) => o.value === value)?.label ?? (value ? String(value) : "—")
+      : field.type === "select"
+        ? field.options?.find((o) => o.value === value)?.label ?? (value ? String(value) : "—")
+        : value
+          ? String(value)
+          : "—";
   return (
     <div className={cn("space-y-1.5", fullWidth && "sm:col-span-2")}>
       <Label className="text-sm">
@@ -183,7 +299,26 @@ function FieldControl({
         {field.required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
 
-      {field.type === "image" ? (
+      {locked ? (
+        // Restricted section the user can't edit — show the value read-only.
+        field.type === "image" ? (
+          value ? (
+            <div className="h-16 w-16 rounded-lg border bg-muted/40 overflow-hidden flex items-center justify-center shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={String(value)} alt="Item" className="h-full w-full object-cover" />
+            </div>
+          ) : (
+            <div className="text-sm h-9 flex items-center text-muted-foreground">—</div>
+          )
+        ) : (
+          <div className="flex items-center gap-2 h-9">
+            <Badge variant="outline">{lockedLabel}</Badge>
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Lock className="h-3 w-3" /> permission required
+            </span>
+          </div>
+        )
+      ) : field.type === "image" ? (
         <ImageField value={(value as string) ?? ""} onChange={onChange} />
       ) : field.type === "textarea" ? (
         <Textarea

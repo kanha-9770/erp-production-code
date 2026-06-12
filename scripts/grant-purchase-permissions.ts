@@ -1,11 +1,14 @@
 /**
  * Grant (or revoke) a purchase approval permission to a role in an organization.
  *
- * The purchase handlers (lib/api-handlers/purchase-system.ts) gate the three
+ * The purchase handlers (lib/api-handlers/purchase-system.ts) gate the
  * privileged transitions on named permissions resolved by hasPermission():
  *   - APPROVE_PURCHASE_REQUISITION → set a PR's Production Approval
  *   - APPROVE_PURCHASE_ORDER       → set a PO's Approval status
  *   - POST_GRN_STOCK               → receive goods / post a GRN to inventory
+ *   - RAISE_PAYMENT_REQUEST        → raise a payment request + mark an approved one PAID
+ *   - APPROVE_PAYMENT_REQUEST      → approve/hold/reject a payment request (the decision)
+ *   - PROCESS_PURCHASE             → buyer: RFQs, POs, suppliers, edit/delete docs
  *
  * Admins / org-owners bypass these automatically. For everyone else, this script
  * wires the role path: it ensures the Permission row exists for the org and
@@ -16,11 +19,15 @@
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Approver"     --perm requisition
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Purchase Mgr" --perm po
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Store Keeper" --perm grn
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Accounts"     --perm payment
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Finance Head" --perm approve-payment
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Buyer"        --perm process
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Buyer"        --perm all
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Approver"     --perm requisition --revoke
  *
- * --perm accepts a friendly alias (requisition|pr, po|order, grn|stock), a full
- * permission name, or "all". Either name OR id works for --org and --role.
+ * --perm accepts a friendly alias (requisition|pr, po|order, grn|stock,
+ * payment, approve-payment, process|buyer), a full permission name, or "all".
+ * Either name OR id works for --org and --role.
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -45,6 +52,21 @@ const PERMS: Record<string, { name: string; description: string }> = {
     description:
       "Receive goods and post a GRN's quantities into store inventory. Grant to store-keeper / warehouse roles.",
   },
+  payment: {
+    name: "RAISE_PAYMENT_REQUEST",
+    description:
+      "Raise a payment request against a PO/GRN, and mark an approved request as PAID. Grant to accounts-payable / account-manager roles.",
+  },
+  "approve-payment": {
+    name: "APPROVE_PAYMENT_REQUEST",
+    description:
+      "Approve, hold or reject a payment request (the approval decision). Marking it PAID is the account manager's RAISE_PAYMENT_REQUEST. Grant to finance-approver / admin roles.",
+  },
+  process: {
+    name: "PROCESS_PURCHASE",
+    description:
+      "Buyer: raise RFQs, create/convert purchase orders, manage suppliers, and edit/delete purchase documents.",
+  },
 };
 
 const ALIASES: Record<string, string> = {
@@ -57,6 +79,14 @@ const ALIASES: Record<string, string> = {
   grn: "grn",
   stock: "grn",
   post_grn_stock: "grn",
+  payment: "payment",
+  raise_payment_request: "payment",
+  "approve-payment": "approve-payment",
+  approve_payment: "approve-payment",
+  approve_payment_request: "approve-payment",
+  process: "process",
+  buyer: "process",
+  process_purchase: "process",
 };
 
 function parseArgs(argv: string[]) {
@@ -78,10 +108,14 @@ function parseArgs(argv: string[]) {
 
 function resolvePerms(arg: unknown): Array<{ name: string; description: string }> {
   const raw = typeof arg === "string" ? arg.trim().toLowerCase() : "";
-  if (!raw) throw new Error("Provide --perm <requisition|po|grn|all|FULL_NAME>");
+  if (!raw)
+    throw new Error("Provide --perm <requisition|po|grn|payment|approve-payment|process|all|FULL_NAME>");
   if (raw === "all") return Object.values(PERMS);
   const key = ALIASES[raw];
-  if (!key) throw new Error(`Unknown --perm "${arg}". Use requisition | po | grn | all.`);
+  if (!key)
+    throw new Error(
+      `Unknown --perm "${arg}". Use requisition | po | grn | payment | approve-payment | process | all.`,
+    );
   return [PERMS[key]];
 }
 

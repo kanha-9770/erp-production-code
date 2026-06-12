@@ -26,7 +26,9 @@ export function OpenPoReport() {
     const q = search.trim().toLowerCase();
     if (!q) return all;
     return all.filter((r) =>
-      `${r.poNo} ${r.supplier ?? ""} ${r.itemName ?? ""} ${r.prRef ?? ""}`.toLowerCase().includes(q),
+      `${r.poNo} ${r.supplier ?? ""} ${r.itemName ?? ""} ${r.prRef ?? ""} ${r.invoiceNos.join(" ")}`
+        .toLowerCase()
+        .includes(q),
     );
   }, [all, search]);
 
@@ -91,7 +93,9 @@ export function OpenPoReport() {
                 <Th>Supplier</Th>
                 <Th>Item</Th>
                 <Th>PR No.</Th>
-                <Th right>Ordered</Th>
+                <Th>Invoice</Th>
+                <Th right>Requested Qty</Th>
+                <Th right>Invoiced Qty</Th>
                 <Th right>Received</Th>
                 <Th right>Balance</Th>
                 <Th right>% Recd</Th>
@@ -109,7 +113,11 @@ export function OpenPoReport() {
                     <Td>{r.supplier ?? "—"}</Td>
                     <Td className="max-w-[200px] truncate">{r.itemName ?? "—"}</Td>
                     <Td className="font-mono">{r.prRef ?? "—"}</Td>
+                    <Td className="font-mono max-w-[160px] truncate">
+                      {r.invoiceNos.length > 0 ? r.invoiceNos.join(", ") : "—"}
+                    </Td>
                     <Td right>{formatNumber(r.orderedQty)}</Td>
+                    <Td right>{r.invoicedQty > 0 ? formatNumber(r.invoicedQty) : "—"}</Td>
                     <Td right>{formatNumber(r.received)}</Td>
                     <Td right className="font-medium">{formatNumber(r.balance)}</Td>
                     <Td right>

@@ -33,7 +33,8 @@ export interface PromotionDef {
   advanceSource?: string;
 }
 
-/** Sum line amounts and pick the first invoice/PO ref from a GRN's nested lines. */
+/** Sum line amounts and pick the first invoice/PO ref from a GRN's receipt
+ *  lines — the invoice grid AND flat challan / no-invoice lines. */
 function grnRollup(grn: PurchaseRecord): { amount: number; invoiceNo: string; poRef: string } {
   const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
   let amount = 0;
@@ -46,6 +47,11 @@ function grnRollup(grn: PurchaseRecord): { amount: number; invoiceNo: string; po
       amount += num(it.amount);
       if (!poRef) poRef = str(it.poRef);
     }
+  }
+  const flat = Array.isArray(grn.receiptLines) ? (grn.receiptLines as Record<string, unknown>[]) : [];
+  for (const it of flat) {
+    amount += num(it.amount);
+    if (!poRef) poRef = str(it.poRef);
   }
   return { amount, invoiceNo, poRef };
 }
@@ -122,8 +128,10 @@ export const PROMOTIONS: Partial<Record<PurchaseSubmoduleKey, PromotionDef[]>> =
           docDate: today(),
           supplier: str(po.supplier),
           status: "GATE_ENTRY",
+          receivedAgainst: "INVOICE",
           // Seed one invoice with one PO line defaulted to a full receipt; the
-          // receiver adjusts received qty / adds the invoice no.
+          // receiver adjusts received qty / adds the invoice no. (Switching
+          // "Received Against" in the form carries these lines across.)
           lines: [
             {
               invoiceNo: "",
