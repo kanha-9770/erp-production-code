@@ -12,6 +12,7 @@ import {
   Warehouse,
   ArrowDownToLine,
   ArrowUpFromLine,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +53,14 @@ export function ModuleNav() {
             </Link>
           );
         })}
+        {/* Discoverability link to the cross-module approvals inbox (page lives under Settings). */}
+        <Link
+          href="/settings/approvals"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-sm font-medium whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <ClipboardCheck className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">My Approvals</span>
+        </Link>
       </div>
     </div>
   );

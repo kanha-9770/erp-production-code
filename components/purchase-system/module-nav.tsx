@@ -32,11 +32,11 @@ const TABS = [
 
 export function ModuleNav() {
   const pathname = usePathname();
-  const { canAccess } = useRouteAccess();
-  // Only show tabs the user may actually open. canAccess is open-by-default
-  // (no rule = allowed) and denies restricted pages the user isn't granted —
-  // the same check the main sidebar uses. Requisition is always open.
-  const tabs = TABS.filter((t) => t.open || canAccess(t.href));
+  const { isPermitted } = useRouteAccess();
+  // Requisition is open to every employee; every other tab is WHITELISTED —
+  // hidden unless the user (or their role) has been granted that page under
+  // Settings → Permissions → Route Access. Admins/owners always see all.
+  const tabs = TABS.filter((t) => t.open || isPermitted(t.href));
   return (
     <div className="border-b bg-background shrink-0">
       <div className="flex items-center gap-1 px-2 sm:px-4 h-12 overflow-x-auto">

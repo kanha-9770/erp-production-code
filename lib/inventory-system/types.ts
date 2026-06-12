@@ -169,10 +169,21 @@ export interface InventoryMovement {
   _deleting?: boolean;
 }
 
+/**
+ * Per-form-section edit access for the logged-in user, keyed
+ * submodule → section name → may-edit. A section is open (true) unless an
+ * admin has granted its section permission to at least one role/user on the
+ * Approvals page — from then on only grantees (and admins) may edit its
+ * fields. UI gating only; the server re-checks every write.
+ */
+export type SectionAccess = Record<SubmoduleKey, Record<string, boolean>>;
+
 /** The full persisted snapshot the service round-trips. */
 export interface InventorySnapshot {
   version: number;
   masters: MasterType[];
   items: Record<SubmoduleKey, InventoryItem[]>;
   movements: InventoryMovement[];
+  /** The requesting user's per-form-section edit access (UI gating). */
+  sectionAccess?: SectionAccess;
 }

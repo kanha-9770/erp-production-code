@@ -102,7 +102,10 @@ export function deriveReceiptStatus(
   value: unknown,
   columns: FieldDef[] = INVOICE_COLUMNS_FALLBACK,
 ): "PENDING" | "PARTIAL" | "FULL" {
-  const leaves = leafRows(asRows(value), columns);
+  return receiptStatusOf(leafRows(asRows(value), columns));
+}
+
+function receiptStatusOf(leaves: Row[]): "PENDING" | "PARTIAL" | "FULL" {
   if (leaves.length === 0) return "PENDING";
   let anyReceived = false;
   let allComplete = true;
@@ -114,4 +117,26 @@ export function deriveReceiptStatus(
   }
   if (!anyReceived) return "PENDING";
   return allComplete ? "FULL" : "PARTIAL";
+}
+
+/**
+ * Every leaf PO/PR item row on a GRN, wherever it was booked: under the
+ * invoice grid (`lines[].items[]` — Received Against = Invoice) or as flat
+ * challan / no-invoice lines (`receiptLines[]`). Receipt math, open-PO
+ * balances and stock posting all consume this so the three receipt modes
+ * behave identically.
+ */
+export function grnItemRows(data: Record<string, unknown> | null | undefined): Row[] {
+  if (!data) return [];
+  const out: Row[] = [];
+  for (const inv of asRows(data.lines)) out.push(...asRows(inv.items));
+  out.push(...asRows(data.receiptLines));
+  return out;
+}
+
+/** GRN-wide receipt status across invoice lines AND flat receipt lines. */
+export function deriveGrnReceiptStatus(
+  data: Record<string, unknown> | null | undefined,
+): "PENDING" | "PARTIAL" | "FULL" {
+  return receiptStatusOf(grnItemRows(data));
 }

@@ -50,6 +50,7 @@ import { usePurchase } from "@/lib/purchase-system/store";
 import { getSchema } from "@/lib/purchase-system/schema";
 import type { PromotionDef } from "@/lib/purchase-system/promote";
 import { formatMoney, formatNumber, formatDate, resolveStatus } from "@/lib/purchase-system/format";
+import { grnItemRows } from "@/lib/purchase-system/receipt";
 import { mediaCount } from "./media-field";
 import { lineSummary } from "./line-items-field";
 import type { FieldDef, PurchaseRecord, PurchaseSubmoduleKey } from "@/lib/purchase-system/types";
@@ -101,6 +102,14 @@ function cellFor(field: FieldDef, record: PurchaseRecord): React.ReactNode {
     );
   }
   if (field.type === "status") {
+    const a = (record as any)?._approval;
+    if (a && (a.status === "PENDING" || a.status === "REJECTED")) {
+      return (
+        <Badge variant={a.status === "PENDING" ? "outline" : "destructive"}>
+          {a.status === "PENDING" ? "Pending Approval" : "Rejected"}
+        </Badge>
+      );
+    }
     const s = resolveStatus(field, record[field.key]);
     return <Badge variant={s.variant}>{s.label}</Badge>;
   }
@@ -132,22 +141,19 @@ function copyFor(field: FieldDef, record: PurchaseRecord): string {
   return v == null ? "" : String(v);
 }
 
-/** Aggregate a GRN's received quantities by item name (mirrors the server). */
+/** Aggregate a GRN's received quantities by item name (mirrors the server) —
+ *  across invoice lines AND flat challan / no-invoice lines. */
 function grnPostSummary(grn: PurchaseRecord | null): {
   items: Array<{ name: string; qty: number }>;
   totalQty: number;
 } {
   if (!grn) return { items: [], totalQty: 0 };
   const map = new Map<string, number>();
-  const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
-  for (const inv of invoices) {
-    const items = Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [];
-    for (const it of items) {
-      const name = String(it.itemName ?? "").trim();
-      const qty = Number(it.receivedQty ?? 0) || 0;
-      if (!name || qty <= 0) continue;
-      map.set(name, (map.get(name) ?? 0) + qty);
-    }
+  for (const it of grnItemRows(grn)) {
+    const name = String(it.itemName ?? "").trim();
+    const qty = Number(it.receivedQty ?? 0) || 0;
+    if (!name || qty <= 0) continue;
+    map.set(name, (map.get(name) ?? 0) + qty);
   }
   const items = [...map.entries()].map(([name, qty]) => ({ name, qty }));
   return { items, totalQty: items.reduce((s, i) => s + i.qty, 0) };
@@ -444,6 +450,11 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
               onDelete={() => setDeletingId(selected.id)}
               onPromote={(def) => setPromote({ def, source: selected })}
               onPostStock={submodule === "grn" ? () => setPostingGrn(selected) : undefined}
+              onSetStatus={
+                submodule === "payment"
+                  ? (status) => void updateRecord(submodule, selected.id, { status })
+                  : undefined
+              }
               permissions={permissions}
             />
           ) : null

@@ -10,6 +10,8 @@ import type {
   PurchaseRecord,
   PurchaseSnapshot,
   PostStockResult,
+  PurchasePermissions,
+  SectionAccess,
   MasterType,
   PurchaseSubmoduleKey,
 } from "./types";
@@ -32,6 +34,17 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export const purchaseService = {
   load(): Promise<PurchaseSnapshot> {
     return api<PurchaseSnapshot>(`${BASE}/load`);
+  },
+
+  /** Re-read just the logged-in user's capability flags + section access
+   *  (cheap; no records). */
+  loadPermissions(): Promise<{
+    permissions: PurchasePermissions;
+    sectionAccess: SectionAccess;
+  }> {
+    return api<{ permissions: PurchasePermissions; sectionAccess: SectionAccess }>(
+      `${BASE}/permissions`,
+    );
   },
 
   createRecord(submodule: PurchaseSubmoduleKey, data: Record<string, unknown>): Promise<PurchaseRecord> {

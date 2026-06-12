@@ -16,19 +16,44 @@ import { seedRecords } from "@/lib/purchase-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
 import {
   POST_GRN_STOCK,
+  APPROVE_PURCHASE_REQUISITION,
+  APPROVE_PURCHASE_ORDER,
   getPurchasePermissions,
   guardedPermissionForCreate,
   guardedPermissionForPatch,
   requirePurchasePermission,
   submoduleCreatePermission,
   deletePermission,
+  purchaseHierarchyEnforced,
+  assertApprovalWithinHierarchy,
+  approvalsEngineOnly,
 } from "@/lib/permissions/purchase-permissions";
+import {
+  assertSectionEditsAllowed,
+  getSectionAccess,
+} from "@/lib/permissions/section-permissions";
+import { isOrgAdmin } from "@/lib/permissions/has-permission";
+import {
+  findMatchingProcess,
+  submitForApproval,
+  cancelOpenRequestsForRecords,
+  APPROVAL_TX_OPTS,
+} from "@/lib/approvals/engine";
+import { ApprovalLockedError } from "@/lib/approvals/errors";
+import type { ApprovalMeta } from "@/lib/approvals/types";
+import {
+  purchaseApprovalAdapter,
+  purchaseApprovalMeta,
+  PURCHASE_MODULE,
+} from "@/lib/purchase-system/approval-adapter";
+import { grnItemRows } from "@/lib/purchase-system/receipt";
 import type {
   PurchaseRecord as PurchaseRecordType,
   PurchaseSnapshot,
   CurrentUserIdentity,
   MasterType,
   PurchaseSubmoduleKey,
+  SectionAccess,
 } from "@/lib/purchase-system/types";
 
 export interface PurCtx {
@@ -48,7 +73,9 @@ export interface PostStockResult {
 
 const SNAPSHOT_VERSION = 1;
 // `docNo` is system-generated and locked — never let a client set or change it.
-const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "docNo"];
+// `_approval` is the server-only approval marker (written exclusively by the
+// approval engine) — a client must never forge or clear it.
+const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "docNo", "_approval"];
 
 function isValidSubmodule(s: unknown): s is PurchaseSubmoduleKey {
   return typeof s === "string" && (SUBMODULE_ORDER as string[]).includes(s);
@@ -141,6 +168,57 @@ async function seedIfFirstLoad(ctx: PurCtx): Promise<void> {
   }
 }
 
+/** PO numbers referenced by a GRN's receipt lines (invoice grid + flat lines). */
+function grnPoRefs(data: Record<string, unknown> | null | undefined): string[] {
+  return grnItemRows(data)
+    .map((r) => String((r as Record<string, unknown>).poRef ?? "").trim())
+    .filter(Boolean);
+}
+
+/**
+ * After any GRN change, recompute received qty per referenced PO across ALL GRNs
+ * and flip that PO's status: → CLOSED once fully received, or back to SENT if a
+ * later edit/deletion drops it below the ordered qty. System action (no approval
+ * gate) — the Open-POs report already hides closed POs; this makes the PO record
+ * itself reflect the closure.
+ */
+async function reconcilePoClosure(organizationId: string, poRefs: string[]): Promise<void> {
+  const refs = [...new Set(poRefs.map((r) => r.trim()).filter(Boolean))];
+  if (refs.length === 0) return;
+
+  const grns = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "grn" },
+    select: { data: true },
+  });
+  const receivedByPo = new Map<string, number>();
+  for (const g of grns) {
+    for (const row of grnItemRows(g.data as Record<string, unknown>)) {
+      const po = String((row as Record<string, unknown>).poRef ?? "").trim();
+      if (!po) continue;
+      receivedByPo.set(po, (receivedByPo.get(po) ?? 0) + (Number((row as Record<string, unknown>).receivedQty ?? 0) || 0));
+    }
+  }
+
+  const pos = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "po" },
+    select: { id: true, data: true },
+  });
+  for (const po of pos) {
+    const d = (po.data as Record<string, unknown>) ?? {};
+    const docNo = String(d.docNo ?? "").trim();
+    if (!refs.includes(docNo)) continue;
+    const ordered = Number(d.quantity ?? 0) || 0;
+    if (ordered <= 0) continue;
+    const received = receivedByPo.get(docNo) ?? 0;
+    const status = String(d.status ?? "");
+    if (received >= ordered && status !== "CLOSED" && status !== "CANCELLED") {
+      await prisma.purchaseRecord.update({ where: { id: po.id }, data: { data: { ...d, status: "CLOSED" } as any, status: "CLOSED" } });
+    } else if (received < ordered && status === "CLOSED") {
+      await prisma.purchaseRecord.update({ where: { id: po.id }, data: { data: { ...d, status: "SENT" } as any, status: "SENT" } });
+    }
+  }
+}
+
 export const PurchaseHandlers = {
   async load(ctx: PurCtx): Promise<PurchaseSnapshot> {
     await seedIfFirstLoad(ctx);
@@ -177,12 +255,32 @@ export const PurchaseHandlers = {
     }
     for (const k of SUBMODULE_ORDER) records[k] ??= [];
 
-    const [currentUser, permissions] = await Promise.all([
+    const [currentUser, basePermissions, sectionAccess, engineOnly] = await Promise.all([
       resolveUserIdentity(ctx.userId),
       getPurchasePermissions(ctx.userId),
+      getSectionAccess(ctx.userId, ctx.organizationId, "purchase"),
+      approvalsEngineOnly(ctx.organizationId),
     ]);
+    // Engine-only mode: the payment approval FIELD is no longer permission-gated
+    // (the approval-process engine controls it) — unlock it in the UI.
+    // EXCEPTIONS that stay gated even under engine-only: GRN stock-posting
+    // (postStock — a real inventory action), the PR's approval fields
+    // (approveRequisition — Production Approval / Item Location Kept) and the PO's
+    // approval field (approvePo — Approval), reserved to the designated approver
+    // (admin / CEO / whoever holds the permission). Mirrors the server gate in
+    // createRecord/updateRecord below.
+    const permissions = engineOnly
+      ? { ...basePermissions, approvePayment: true }
+      : basePermissions;
 
-    return { version: SNAPSHOT_VERSION, masters, records, currentUser, permissions };
+    return {
+      version: SNAPSHOT_VERSION,
+      masters,
+      records,
+      currentUser,
+      permissions,
+      sectionAccess: sectionAccess as SectionAccess,
+    };
   },
 
   async createRecord(ctx: PurCtx, submodule: unknown, data: Record<string, unknown>): Promise<PurchaseRecordType> {
@@ -196,7 +294,39 @@ export const PurchaseHandlers = {
     // Block creating a record already pre-approved / pre-posted to skip the gate;
     // benign defaults (PENDING/NO) pass through without a permission.
     const createNeeds = guardedPermissionForCreate(submodule, clean);
-    if (createNeeds) await requirePurchasePermission(ctx.userId, createNeeds);
+    // Engine-only mode skips the legacy field gate (the approval-process engine
+    // is the sole approval gate) — except GRN stock-posting (a real inventory
+    // action) and the PR/PO approvals (reserved to their designated approver),
+    // which stay gated regardless.
+    const createEngineOnly = await approvalsEngineOnly(ctx.organizationId);
+    if (
+      createNeeds &&
+      (!createEngineOnly ||
+        createNeeds === POST_GRN_STOCK ||
+        createNeeds === APPROVE_PURCHASE_REQUISITION ||
+        createNeeds === APPROVE_PURCHASE_ORDER)
+    ) {
+      await requirePurchasePermission(ctx.userId, createNeeds);
+      // Closing the create-time back-door under hierarchy mode: you can't mint a
+      // pre-approved document (you'd be approving your own — never a subordinate's).
+      if (!createEngineOnly && (await purchaseHierarchyEnforced(ctx.organizationId))) {
+        await assertApprovalWithinHierarchy({
+          actingUserId: ctx.userId,
+          creatorId: ctx.userId,
+          organizationId: ctx.organizationId,
+        });
+      }
+    }
+    // Restricted form sections may only be pre-filled by their grantees
+    // (diffed against the schema defaults — untouched defaults pass).
+    await assertSectionEditsAllowed({
+      userId: ctx.userId,
+      organizationId: ctx.organizationId,
+      module: "purchase",
+      submodule,
+      existing: null,
+      patch: clean,
+    });
 
     // User-derived fields ("Requested By", Department) are authoritative: resolve
     // them from the authenticated user and overwrite any client-sent value, so
@@ -211,8 +341,12 @@ export const PurchaseHandlers = {
       }
     }
 
+    const userStatus = (clean.status as string) ?? null;
+
     // Mint the document number and persist it atomically with the record, so an
-    // aborted create never burns a number.
+    // aborted create never burns a number. If an approval process intercepts the
+    // create, the record is created then immediately flagged PENDING via
+    // `data._approval` (the workflow `status` column is left untouched).
     const row = await prisma.$transaction(async (tx) => {
       const docNo = await nextCode(tx, {
         scopeKey: `pur:${ctx.organizationId}:${submodule}`,
@@ -220,16 +354,47 @@ export const PurchaseHandlers = {
         computeSeed: () =>
           maxCodeSuffix(tx, "purchase_records", ctx.organizationId, submodule, "docNo", schema.codePrefix),
       });
-      return tx.purchaseRecord.create({
+      const recordData = { ...clean, ...userOverrides, docNo };
+      const created = await tx.purchaseRecord.create({
         data: {
           organizationId: ctx.organizationId,
           submodule,
-          status: (clean.status as string) ?? null,
-          data: { ...clean, ...userOverrides, docNo } as any,
+          status: userStatus,
+          data: recordData as any,
           createdById: ctx.userId,
         },
       });
-    });
+
+      const normalized = await purchaseApprovalAdapter.canonicalizeData(ctx.organizationId, submodule, recordData);
+      const changedKeys = Object.keys(recordData).filter((k) => {
+        const v = (recordData as Record<string, unknown>)[k];
+        return v != null && v !== "" && !(Array.isArray(v) && v.length === 0);
+      });
+      const process = await findMatchingProcess(
+        tx,
+        { organizationId: ctx.organizationId, module: PURCHASE_MODULE, submodule },
+        "CREATE",
+        normalized,
+        { changedKeys, fieldSections: purchaseApprovalAdapter.fieldSections(submodule) },
+      );
+      if (!process) return created;
+
+      const { approvalMeta } = await submitForApproval(tx, {
+        organizationId: ctx.organizationId,
+        module: PURCHASE_MODULE,
+        submodule,
+        recordId: created.id,
+        requestedById: ctx.userId,
+        trigger: "CREATE",
+        process,
+        priorStatus: userStatus,
+      });
+      return tx.purchaseRecord.update({
+        where: { id: created.id },
+        data: { data: { ...recordData, _approval: approvalMeta } as any },
+      });
+    }, APPROVAL_TX_OPTS);
+    if (submodule === "grn") await reconcilePoClosure(ctx.organizationId, grnPoRefs(row.data as Record<string, unknown>));
     return toRecord(row);
   },
 
@@ -240,26 +405,132 @@ export const PurchaseHandlers = {
     });
     if (!existing) throw new Error("Record not found");
     const existingData = (existing.data as Record<string, unknown>) ?? {};
+
+    // A record awaiting approval is read-only: only an admin may force-edit it;
+    // everyone else must recall the pending request first. (Purchase tracks
+    // pending in `data._approval`, not the workflow status column.)
+    const isPending = purchaseApprovalMeta(existingData)?.status === "PENDING";
+    if (isPending && !(await isOrgAdmin(ctx.userId))) throw new ApprovalLockedError();
+
     const cleanPatch = stripReserved(patch || {});
 
     // Approval / stock-posting transitions are privileged: only callers holding
     // the matching named permission (or admins/owner) may flip them. An ordinary
     // edit that doesn't touch a guarded field needs no special permission.
     const needed = guardedPermissionForPatch(submodule, existingData, cleanPatch);
-    if (needed) await requirePurchasePermission(ctx.userId, needed);
+    // Engine-only mode: the approval-process engine is the sole approval gate, so
+    // the legacy field-permission check is skipped (no configured process ⇒ the
+    // field is freely editable) — except GRN stock-posting (a real inventory
+    // action) and the PR/PO approvals (reserved to their designated approver),
+    // which stay gated regardless.
+    const editEngineOnly = await approvalsEngineOnly(ctx.organizationId);
+    if (
+      needed &&
+      (!editEngineOnly ||
+        needed === POST_GRN_STOCK ||
+        needed === APPROVE_PURCHASE_REQUISITION ||
+        needed === APPROVE_PURCHASE_ORDER)
+    ) {
+      await requirePurchasePermission(ctx.userId, needed);
+      // Legacy mode only: an approver may act only on documents raised by their
+      // own subordinates (role hierarchy) when the org enabled that gate.
+      if (!editEngineOnly && (await purchaseHierarchyEnforced(ctx.organizationId))) {
+        await assertApprovalWithinHierarchy({
+          actingUserId: ctx.userId,
+          creatorId: existing.createdById,
+          organizationId: ctx.organizationId,
+        });
+      }
+    }
+    // Section-restricted fields may only be CHANGED by their grantees
+    // (re-saving the full form bag with untouched values passes).
+    await assertSectionEditsAllowed({
+      userId: ctx.userId,
+      organizationId: ctx.organizationId,
+      module: "purchase",
+      submodule,
+      existing: existingData,
+      patch: cleanPatch,
+    });
 
     const merged = { ...existingData, ...cleanPatch };
+
+    // Admin force-edit while pending: persist the change but keep it pending.
+    if (isPending) {
+      const row = await prisma.purchaseRecord.update({
+        where: { id },
+        data: { data: merged as any, status: (merged.status as string) ?? null },
+      });
+      if (submodule === "grn") await reconcilePoClosure(ctx.organizationId, [...grnPoRefs(existingData), ...grnPoRefs(merged)]);
+      return toRecord(row);
+    }
+
+    // Does an EDIT approval process intercept this change? If so, PARK the patch
+    // (record keeps its old values + a pending marker) until approved.
+    const normalized = await purchaseApprovalAdapter.canonicalizeData(ctx.organizationId, submodule, merged);
+    const changedKeys = Object.keys(cleanPatch).filter(
+      (k) => String(cleanPatch[k] ?? "") !== String(existingData[k] ?? ""),
+    );
+    const process = await findMatchingProcess(
+      prisma,
+      { organizationId: ctx.organizationId, module: PURCHASE_MODULE, submodule },
+      "EDIT",
+      normalized,
+      { changedKeys, fieldSections: purchaseApprovalAdapter.fieldSections(submodule) },
+    );
+    if (process) {
+      const row = await prisma.$transaction(async (tx) => {
+        const { approvalMeta } = await submitForApproval(tx, {
+          organizationId: ctx.organizationId,
+          module: PURCHASE_MODULE,
+          submodule,
+          recordId: id,
+          requestedById: ctx.userId,
+          trigger: "EDIT",
+          process,
+          pendingPatch: cleanPatch,
+          prePatchData: existingData,
+          priorStatus: (existingData.status as string) ?? null,
+        });
+        return tx.purchaseRecord.update({
+          where: { id },
+          data: {
+            data: { ...existingData, _approval: approvalMeta } as any,
+            status: (existingData.status as string) ?? null,
+          },
+        });
+      }, APPROVAL_TX_OPTS);
+      return toRecord(row);
+    }
+
+    // No approval needed — apply as before, dropping any stale terminal marker.
+    const nextData = { ...merged };
+    const marker = nextData._approval as ApprovalMeta | undefined;
+    if (marker && marker.status !== "PENDING") delete nextData._approval;
     const row = await prisma.purchaseRecord.update({
       where: { id },
-      data: { data: merged as any, status: (merged.status as string) ?? null },
+      data: { data: nextData as any, status: (merged.status as string) ?? null },
     });
+    if (submodule === "grn") await reconcilePoClosure(ctx.organizationId, [...grnPoRefs(existingData), ...grnPoRefs(merged)]);
     return toRecord(row);
   },
 
   async deleteRecord(ctx: PurCtx, id: string): Promise<{ id: string }> {
     // Deleting any purchase document is a buyer/admin action, not a requester's.
     await requirePurchasePermission(ctx.userId, deletePermission());
-    await prisma.purchaseRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
+    // If a GRN is being deleted, remember which POs it touched so we can re-open
+    // any that drop below full receipt afterwards.
+    const doomed = await prisma.purchaseRecord.findFirst({
+      where: { id, organizationId: ctx.organizationId },
+      select: { submodule: true, data: true },
+    });
+    await prisma.$transaction(async (tx) => {
+      await cancelOpenRequestsForRecords(tx, ctx.organizationId, [id], ctx.userId);
+      await tx.purchaseRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
+    }, APPROVAL_TX_OPTS);
+    if (doomed?.submodule === "grn") {
+      await reconcilePoClosure(ctx.organizationId, grnPoRefs(doomed.data as Record<string, unknown>));
+    }
     return { id };
   },
 
@@ -293,21 +564,18 @@ export const PurchaseHandlers = {
     }
 
     // Aggregate received qty (+ amount, for a unit rate) per item name across
-    // every invoice line on this GRN.
-    const lines = Array.isArray(data.lines) ? (data.lines as Record<string, unknown>[]) : [];
+    // every receipt line on this GRN — invoice lines and flat challan /
+    // no-invoice lines alike.
     const byItem = new Map<string, { name: string; qty: number; amount: number }>();
-    for (const inv of lines) {
-      const items = Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [];
-      for (const it of items) {
-        const name = String(it.itemName ?? "").trim();
-        const qty = Number(it.receivedQty ?? 0) || 0;
-        if (!name || qty <= 0) continue;
-        const key = name.toLowerCase();
-        const cur = byItem.get(key) ?? { name, qty: 0, amount: 0 };
-        cur.qty += qty;
-        cur.amount += Number(it.amount ?? 0) || 0;
-        byItem.set(key, cur);
-      }
+    for (const it of grnItemRows(data)) {
+      const name = String(it.itemName ?? "").trim();
+      const qty = Number(it.receivedQty ?? 0) || 0;
+      if (!name || qty <= 0) continue;
+      const key = name.toLowerCase();
+      const cur = byItem.get(key) ?? { name, qty: 0, amount: 0 };
+      cur.qty += qty;
+      cur.amount += Number(it.amount ?? 0) || 0;
+      byItem.set(key, cur);
     }
     if (byItem.size === 0) throw new Error("This GRN has no received quantities to post.");
 

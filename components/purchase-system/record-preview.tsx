@@ -5,7 +5,18 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Pencil, Trash2, Loader2, ArrowRight, PackageCheck, CheckCircle2, Lock } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  Loader2,
+  ArrowRight,
+  PackageCheck,
+  CheckCircle2,
+  Lock,
+  BadgeCheck,
+  Ban,
+  Banknote,
+} from "lucide-react";
 import { formatDate, formatMoney, formatNumber, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
 import { promotionsFor, type PromotionDef } from "@/lib/purchase-system/promote";
 import { MediaGallery } from "./media-field";
@@ -33,6 +44,7 @@ export function RecordPreview({
   onDelete,
   onPromote,
   onPostStock,
+  onSetStatus,
   permissions,
 }: {
   schema: SubmoduleSchema;
@@ -43,6 +55,8 @@ export function RecordPreview({
   onPromote?: (def: PromotionDef) => void;
   /** GRN only: post received quantities into Store Inventory. */
   onPostStock?: () => void;
+  /** Advance this document's workflow status (payment approval buttons). */
+  onSetStatus?: (status: string) => void;
   /** The logged-in user's purchase capabilities — drives which action buttons
    *  show. A pure requester (no caps) sees only the read-only document. */
   permissions: PurchasePermissions;
@@ -55,7 +69,8 @@ export function RecordPreview({
     permissions.approveRequisition ||
     permissions.approvePo ||
     permissions.postStock ||
-    permissions.raisePayment;
+    permissions.raisePayment ||
+    permissions.approvePayment;
   const canDelete = permissions.process;
   const canPostStock = permissions.postStock;
   const canPromoteTo = (to: string) =>
@@ -76,7 +91,32 @@ export function RecordPreview({
   const statusField = schema.fields.find((f) => f.key === schema.statusKey);
   const status = statusField ? resolveStatus(statusField, record[schema.statusKey]) : null;
 
-  const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, record[f.showIf.field]);
+  // Records saved before a controlling field existed (e.g. a GRN without
+  // "Received Against") evaluate showIf against that field's default, so their
+  // dependent sections don't vanish from the preview.
+  const controllingValue = (f: FieldDef) => {
+    const key = f.showIf!.field;
+    if (record[key] != null && record[key] !== "") return record[key];
+    return schema.fields.find((c) => c.key === key)?.defaultValue;
+  };
+  const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, controllingValue(f));
+
+  // Payment approval — the permitted approver acts straight from the preview.
+  const paymentStatus = schema.key === "payment" ? String(record.status ?? "") : null;
+  const paymentActions: Array<{ status: string; label: string; icon: React.ReactNode }> =
+    schema.key === "payment" && onSetStatus && permissions.approvePayment
+      ? paymentStatus === "REQUESTED" || paymentStatus === "ON_HOLD"
+        ? [
+            { status: "APPROVED", label: "Approve payment", icon: <BadgeCheck className="h-3.5 w-3.5 mr-1.5" /> },
+            ...(paymentStatus === "REQUESTED"
+              ? [{ status: "ON_HOLD", label: "Put on hold", icon: <Loader2 className="h-3.5 w-3.5 mr-1.5" /> }]
+              : []),
+            { status: "REJECTED", label: "Reject", icon: <Ban className="h-3.5 w-3.5 mr-1.5" /> },
+          ]
+        : paymentStatus === "APPROVED"
+          ? [{ status: "PAID", label: "Mark as paid", icon: <Banknote className="h-3.5 w-3.5 mr-1.5" /> }]
+          : []
+      : [];
   // When a line-items subform holds the detail, hide the flat mirror fields so
   // they aren't shown twice; legacy records without rows still show them.
   const hasLineItems = schema.fields.some(
@@ -105,7 +145,17 @@ export function RecordPreview({
             {String(record.supplierName ?? record.itemName ?? record.supplier ?? schema.label)}
           </div>
         </div>
-        {status && <Badge variant={status.variant}>{status.label}</Badge>}
+        {(() => {
+          const a = (record as any)?._approval;
+          if (a && (a.status === "PENDING" || a.status === "REJECTED")) {
+            return (
+              <Badge variant={a.status === "PENDING" ? "outline" : "destructive"}>
+                {a.status === "PENDING" ? "Pending Approval" : "Rejected"}
+              </Badge>
+            );
+          }
+          return status && <Badge variant={status.variant}>{status.label}</Badge>;
+        })()}
       </div>
 
       {(canEdit || canDelete) && (
@@ -127,6 +177,33 @@ export function RecordPreview({
           )}
         </div>
       )}
+
+      {schema.key === "payment" &&
+        (paymentActions.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Payment approval
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {paymentActions.map((a) => (
+                <Button
+                  key={a.status}
+                  size="sm"
+                  variant={a.status === "REJECTED" ? "outline" : "default"}
+                  className={a.status === "REJECTED" ? "text-destructive hover:text-destructive" : undefined}
+                  onClick={() => onSetStatus?.(a.status)}
+                >
+                  {a.icon}
+                  {a.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : !permissions.approvePayment && (paymentStatus === "REQUESTED" || paymentStatus === "ON_HOLD") ? (
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" /> Approver permission required to act on this payment
+          </span>
+        ) : null)}
 
       {(promotions.length > 0 || onPostStock) && record.docNo ? (
         <div className="space-y-2">

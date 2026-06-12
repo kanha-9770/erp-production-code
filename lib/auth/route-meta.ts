@@ -92,8 +92,15 @@ export async function computeRouteMeta(
       continue;
     }
 
-    // Role-level check
+    // Role-level check. If NONE of the user's roles has a rule for this route,
+    // leave it OPEN (open-by-default) — matches the sidebar/middleware contract
+    // ("shown unless explicitly DENIED"). Previously a missing rule was pushed
+    // to `denied`, so granting a route to ANY role implicitly denied it to every
+    // other role — silently whitelisting the whole app and emptying non-granted
+    // users' sidebars. Restriction must come from an explicit deny row, not the
+    // mere existence of a grant for someone else.
     const matchingRoleAccess = rp.roleAccess.filter((ra) => roleIds.includes(ra.roleId));
+    if (matchingRoleAccess.length === 0) continue;
     const hasRoleGrant = matchingRoleAccess.some((ra) => ra.granted);
     (hasRoleGrant ? allowed : denied).push(rp.pattern);
   }

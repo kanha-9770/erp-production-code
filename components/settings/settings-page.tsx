@@ -47,6 +47,14 @@ const settingsData: SettingCategory[] = [
     ],
   },
   {
+    title: "Approvals",
+    items: [
+      { name: "My Approvals & History", href: "/settings/approvals" },
+      { name: "Inventory Approval Processes", href: "/settings/inventory/approval-processes" },
+      { name: "Purchase Approval Processes", href: "/settings/purchase/approval-processes" },
+    ],
+  },
+  {
     title: "Channels",
     items: [
       { name: "Email", href: "/settings/email" },

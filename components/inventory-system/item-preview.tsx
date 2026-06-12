@@ -13,6 +13,8 @@ import {
   deriveStockStatus,
   STATUS_LABEL,
   STATUS_VARIANT,
+  getApprovalMeta,
+  APPROVAL_BADGE,
 } from "@/lib/inventory-system/format";
 import type { FieldDef, InventoryItem, SubmoduleSchema } from "@/lib/inventory-system/types";
 
@@ -79,7 +81,14 @@ export function ItemPreview({
             {String(item.itemCode ?? "")}
           </div>
         </div>
-        <Badge variant={STATUS_VARIANT[status]}>{STATUS_LABEL[status]}</Badge>
+        {(() => {
+          const a = getApprovalMeta(item);
+          if (a && (a.status === "PENDING" || a.status === "REJECTED")) {
+            const b = APPROVAL_BADGE[a.status];
+            return <Badge variant={b.variant}>{b.label}</Badge>;
+          }
+          return <Badge variant={STATUS_VARIANT[status]}>{STATUS_LABEL[status]}</Badge>;
+        })()}
       </div>
 
       <div className="flex gap-2">

@@ -49,6 +49,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: rec }, { status: 201 });
   } catch (e: any) {
     console.error("[inventory-system/items POST]", e);
-    return fail(e?.message || "Failed to create item", /not found|invalid/i.test(e?.message || "") ? 400 : 500);
+    return fail(e?.message || "Failed to create item", e?.forbidden ? 403 : /not found|invalid/i.test(e?.message || "") ? 400 : 500);
   }
 }

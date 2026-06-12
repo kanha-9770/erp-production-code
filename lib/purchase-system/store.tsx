@@ -19,12 +19,13 @@ import {
 } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { purchaseService } from "./service";
-import { deriveReceiptStatus } from "./receipt";
+import { deriveGrnReceiptStatus, grnItemRows } from "./receipt";
 import type {
   PurchaseRecord,
   PostStockResult,
   CurrentUserIdentity,
   PurchasePermissions,
+  SectionAccess,
   MasterOption,
   MasterType,
   PurchaseSubmoduleKey,
@@ -38,6 +39,9 @@ interface PurchaseContextValue {
   currentUser: CurrentUserIdentity;
   /** Privileged-action flags for the logged-in user — UI gating only. */
   permissions: PurchasePermissions;
+  /** Per-form-section edit access for the logged-in user — UI gating only.
+   *  A missing submodule/section means "open" (editable). */
+  sectionAccess: SectionAccess;
 
   createRecord: (submodule: PurchaseSubmoduleKey, data: Record<string, unknown>) => Promise<void>;
   updateRecord: (
@@ -75,6 +79,8 @@ interface PurchaseContextValue {
   deleteMasterType: (key: string) => Promise<void>;
 
   resetAll: () => Promise<void>;
+  /** Re-fetch all records (after an out-of-band change, e.g. an approval recall). */
+  reload: () => Promise<void>;
 }
 
 export interface ItemPurchaseHistory {
@@ -112,6 +118,10 @@ export interface PoBalance {
   supplier?: string;
   itemName?: string;
   prRef?: string;
+  /** Invoice numbers booked against this PO via GRNs (empty until received). */
+  invoiceNos: string[];
+  /** Qty invoiced/expected against this PO across all GRN receipt lines. */
+  invoicedQty: number;
   orderedQty: number;
   received: number;
   balance: number;
@@ -121,7 +131,9 @@ export interface PoBalance {
   lastReceiptDate?: string;
 }
 
-/** Sum received qty per PO No. and per PR No. across every GRN's nested lines. */
+/** Sum received qty per PO No. and per PR No. across every GRN's receipt
+ *  lines — invoice lines (`lines[].items[]`) and flat challan / no-invoice
+ *  lines (`receiptLines[]`) alike. */
 function buildReceivedMaps(grnRows: PurchaseRecord[]): {
   byPo: Map<string, number>;
   byPr: Map<string, number>;
@@ -129,16 +141,12 @@ function buildReceivedMaps(grnRows: PurchaseRecord[]): {
   const byPo = new Map<string, number>();
   const byPr = new Map<string, number>();
   for (const grn of grnRows) {
-    const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
-    for (const inv of invoices) {
-      const items = Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [];
-      for (const it of items) {
-        const rec = Number(it.receivedQty ?? 0) || 0;
-        const po = String(it.poRef ?? "").trim();
-        const pr = String(it.prRef ?? "").trim();
-        if (po) byPo.set(po, (byPo.get(po) ?? 0) + rec);
-        if (pr) byPr.set(pr, (byPr.get(pr) ?? 0) + rec);
-      }
+    for (const it of grnItemRows(grn)) {
+      const rec = Number(it.receivedQty ?? 0) || 0;
+      const po = String(it.poRef ?? "").trim();
+      const pr = String(it.prRef ?? "").trim();
+      if (po) byPo.set(po, (byPo.get(po) ?? 0) + rec);
+      if (pr) byPr.set(pr, (byPr.get(pr) ?? 0) + rec);
     }
   }
   return { byPo, byPr };
@@ -168,8 +176,11 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     approvePo: false,
     postStock: false,
     raisePayment: false,
+    approvePayment: false,
     process: false,
   });
+  // Empty until the snapshot loads — consumers treat a missing entry as open.
+  const [sectionAccess, setSectionAccess] = useState<SectionAccess>({} as SectionAccess);
 
   const mastersRef = useRef(masters);
   mastersRef.current = masters;
@@ -187,12 +198,56 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       setMasters(snap.masters);
       if (snap.currentUser) setCurrentUser(snap.currentUser);
       if (snap.permissions) setPermissions(snap.permissions);
+      if (snap.sectionAccess) setSectionAccess(snap.sectionAccess);
       setReady(true);
     });
     return () => {
       alive = false;
     };
   }, []);
+
+  // Capability flags are resolved live server-side but cached on the client from
+  // the initial load. Re-read just the flags (cheap — no records) whenever the
+  // user returns to this tab/window, so a permission granted on the Approvals
+  // page takes effect without a hard refresh. Buttons/locks update in place.
+  const refreshPermissions = useCallback(async () => {
+    try {
+      const { permissions: perms, sectionAccess: sections } =
+        await purchaseService.loadPermissions();
+      setPermissions(perms);
+      if (sections) setSectionAccess(sections);
+    } catch {
+      // Non-fatal: keep the last-known flags if the poll fails.
+    }
+  }, []);
+
+  // Re-fetch every record from the server. Used after an out-of-band change the
+  // optimistic CRUD path didn't make (e.g. an approval recall/resubmit).
+  const reload = useCallback(async () => {
+    try {
+      const snap = await purchaseService.load();
+      setRecords(snap.records);
+      if (snap.masters) setMasters(snap.masters);
+      if (snap.permissions) setPermissions(snap.permissions);
+      if (snap.sectionAccess) setSectionAccess(snap.sectionAccess);
+    } catch {
+      // Non-fatal.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const onFocus = () => void refreshPermissions();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshPermissions();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [ready, refreshPermissions]);
 
   // Keep the legacy "supplier" dropdown master in sync with the Supplier Master
   // entity: its options are a projection of the supplier records (active flag
@@ -224,7 +279,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString();
       // GRN receipt completeness is system-derived, never typed.
       const payload =
-        submodule === "grn" ? { ...data, receiptStatus: deriveReceiptStatus(data.lines) } : data;
+        submodule === "grn" ? { ...data, receiptStatus: deriveGrnReceiptStatus(data) } : data;
       const optimistic: PurchaseRecord = {
         ...payload,
         id: tempId,
@@ -259,10 +314,13 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
   const updateRecord = useCallback(
     async (submodule: PurchaseSubmoduleKey, id: string, patch: Record<string, unknown>) => {
       let snapshot: PurchaseRecord | undefined;
-      const payload =
-        submodule === "grn" && "lines" in patch
-          ? { ...patch, receiptStatus: deriveReceiptStatus(patch.lines) }
-          : patch;
+      // GRN receipt completeness is re-derived whenever receipt lines change
+      // (whichever shape they're booked in: invoices or flat challan lines).
+      let payload = patch;
+      if (submodule === "grn" && ("lines" in patch || "receiptLines" in patch)) {
+        const current = recordsRef.current.grn.find((r) => r.id === id);
+        payload = { ...patch, receiptStatus: deriveGrnReceiptStatus({ ...current, ...patch }) };
+      }
       setRecords((prev) => ({
         ...prev,
         [submodule]: prev[submodule].map((r) => {
@@ -506,18 +564,33 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getPendingPoBalances = useCallback((): PoBalance[] => {
-    // received qty + last receipt date per PO, across every GRN's nested lines.
-    const recv = new Map<string, { qty: number; lastDate?: string }>();
+    // received/invoiced qty + invoice numbers + last receipt date per PO,
+    // across every GRN's receipt lines (invoice grid AND flat challan lines).
+    const recv = new Map<
+      string,
+      { qty: number; invoicedQty: number; invoiceNos: Set<string>; lastDate?: string }
+    >();
     for (const grn of recordsRef.current.grn) {
-      const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
       const grnDate = (grn.docDate as string) || (grn.createdAt as string);
-      for (const inv of invoices) {
-        const items = Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [];
+      const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
+      const flatLines = Array.isArray(grn.receiptLines)
+        ? (grn.receiptLines as Record<string, unknown>[])
+        : [];
+      const groups: Array<{ invoiceNo: string; items: Record<string, unknown>[] }> = [
+        ...invoices.map((inv) => ({
+          invoiceNo: String(inv.invoiceNo ?? "").trim(),
+          items: Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [],
+        })),
+        { invoiceNo: "", items: flatLines },
+      ];
+      for (const { invoiceNo, items } of groups) {
         for (const it of items) {
           const po = String(it.poRef ?? "").trim();
           if (!po) continue;
-          const cur = recv.get(po) ?? { qty: 0 };
+          const cur = recv.get(po) ?? { qty: 0, invoicedQty: 0, invoiceNos: new Set<string>() };
           cur.qty += Number(it.receivedQty ?? 0) || 0;
+          cur.invoicedQty += Number(it.invoiceQty ?? 0) || 0;
+          if (invoiceNo) cur.invoiceNos.add(invoiceNo);
           if (grnDate && (!cur.lastDate || grnDate > cur.lastDate)) cur.lastDate = grnDate;
           recv.set(po, cur);
         }
@@ -541,6 +614,8 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
         supplier: po.supplier as string | undefined,
         itemName: po.itemName as string | undefined,
         prRef: getPoTrace(poNo).prRef,
+        invoiceNos: [...(entry?.invoiceNos ?? [])],
+        invoicedQty: entry?.invoicedQty ?? 0,
         orderedQty,
         received,
         balance,
@@ -682,6 +757,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     setMasters(snap.masters);
     if (snap.currentUser) setCurrentUser(snap.currentUser);
     if (snap.permissions) setPermissions(snap.permissions);
+    if (snap.sectionAccess) setSectionAccess(snap.sectionAccess);
     toast({ title: "Purchase data reset", description: "Sample data has been restored." });
   }, [toast]);
 
@@ -692,6 +768,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       masters,
       currentUser,
       permissions,
+      sectionAccess,
       createRecord,
       updateRecord,
       deleteRecord,
@@ -711,6 +788,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       addMasterType,
       deleteMasterType,
       resetAll,
+      reload,
     }),
     [
       ready,
@@ -718,6 +796,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       masters,
       currentUser,
       permissions,
+      sectionAccess,
       createRecord,
       updateRecord,
       deleteRecord,
@@ -737,6 +816,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       addMasterType,
       deleteMasterType,
       resetAll,
+      reload,
     ],
   );
 

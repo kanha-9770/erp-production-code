@@ -4718,6 +4718,141 @@ model PurchaseMasterSnapshot {
   @@map("purchase_master_snapshots")
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Approval engine (lib/approvals) — GENERIC, module-agnostic approval workflow
+// modelled on Zoho CRM's Approval Process. Wired to the inventory module now;
+// other modules reuse it by passing their own `module`/`submodule` + an adapter.
+// No FK to the approved record (open JSON-record pattern, like InventoryRecord);
+// tenancy enforced in the handler layer.
+//
+//   ApprovalProcess  — admin-configured rule: criteria + ordered approver stages
+//                      + actions on approve/reject. `criteria`/`stages` are JSON.
+//   ApprovalRequest  — one in-flight/closed instance against a single record. It
+//                      FREEZES the process into `processSnapshot` at submit time
+//                      so editing the process never changes live requests.
+//   ApprovalAction   — the granular per-decision history timeline (who/when/what).
+// ───────────────────────────────────────────────────────────────────────────
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  RECALLED
+}
+
+enum ApprovalActionType {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  RECALLED
+  RESUBMITTED
+}
+
+enum ApprovalTrigger {
+  CREATE
+  EDIT
+  BOTH
+}
+
+model ApprovalProcess {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  module      String // "inventory" | "purchase" | …
+  submodule   String? // "store" | "machine" | "metal" | null = all submodules
+  name        String
+  description String?
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order") // tie-break for multi-match (lowest wins)
+
+  trigger ApprovalTrigger @default(BOTH)
+
+  // { matchMode, rules, scope } — scope adds field/section granularity:
+  //   scope = { type: "record" } | { type: "section", sections } | { type: "fields", fields }
+  // Stored inside criteria so no extra column is needed. Empty rules ⇒ match all.
+  criteria Json @default("{}")
+  // [{ name, mode: "ALL"|"ANY", approverUserIds: string[], approverRoleIds: string[] }]
+  stages   Json @default("[]")
+  // { setStatus?: string, setFields?: Record<string, unknown> }
+  onApprove Json? @map("on_approve")
+  onReject  Json? @map("on_reject")
+  // string[] of user ids who can administer (force-decide) this process.
+  adminUserIds Json @default("[]") @map("admin_user_ids")
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  requests ApprovalRequest[]
+
+  @@index([organizationId, module, submodule, isActive, sortOrder])
+  @@map("approval_processes")
+}
+
+model ApprovalRequest {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  module    String
+  submodule String?
+  recordId  String  @map("record_id") // target record id — NO FK (open-record pattern)
+
+  processId String?          @map("process_id") // nullable so a request survives process deletion
+  process   ApprovalProcess? @relation(fields: [processId], references: [id], onDelete: SetNull)
+
+  // Frozen { stages, onApprove, onReject, criteria, name } captured at submit.
+  // ALL decision logic reads this snapshot, never the live process.
+  processSnapshot Json @map("process_snapshot")
+
+  status       ApprovalRequestStatus @default(PENDING)
+  currentStage Int                   @default(0) @map("current_stage")
+
+  requestedById String          @map("requested_by_id")
+  trigger       ApprovalTrigger // CREATE or EDIT
+
+  // Active role ids the requester held when they raised this request, frozen at
+  // submit time. Used by hierarchy-scoped stages so a role approver can only act
+  // on requests raised by someone whose role sits below theirs in the role tree.
+  requesterRoleIds String[] @default([]) @map("requester_role_ids")
+
+  // EDIT requests park the proposed patch here (+ pre-edit data) and apply it on
+  // approval. CREATE writes data immediately (the row must exist), so these stay null.
+  pendingPatch Json? @map("pending_patch")
+  prePatchData Json? @map("pre_patch_data")
+
+  // Set when this request is a resubmit of a prior rejected/recalled one.
+  supersedesId String? @map("supersedes_id")
+
+  decidedAt DateTime? @map("decided_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  actions ApprovalAction[]
+
+  @@index([organizationId, module, status, currentStage]) // inbox candidate fetch
+  @@index([organizationId, recordId]) // record history / banner
+  @@index([organizationId, status, requestedById]) // "my requests"
+  @@map("approval_requests")
+}
+
+model ApprovalAction {
+  id        String          @id @default(cuid())
+  requestId String          @map("request_id")
+  request   ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  organizationId String @map("organization_id") // denormalised for direct org-scoped queries
+
+  type      ApprovalActionType
+  stage     Int // stage index this action targeted (-1 for SUBMITTED/meta)
+  actorId   String  @map("actor_id")
+  viaRoleId String? @map("via_role_id") // which role justified eligibility (audit)
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([requestId, stage])
+  @@index([requestId, createdAt])
+  @@map("approval_actions")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // REBM PHASE 4 — Plan Designer, RERA, Team Self-Service
 // ─────────────────────────────────────────────────────────────────────────────

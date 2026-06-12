@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions/has-permission";
 export const POST_INVENTORY_MOVEMENT = "POST_INVENTORY_MOVEMENT";
 export const DELETE_INVENTORY_ITEM = "DELETE_INVENTORY_ITEM";
 export const RESET_INVENTORY_DATA = "RESET_INVENTORY_DATA";
+export const MANAGE_INVENTORY_APPROVAL_PROCESS = "MANAGE_INVENTORY_APPROVAL_PROCESS";
 
 /** Source of truth for the inventory permissions, used by the catalog + tooling. */
 export const INVENTORY_PERMISSIONS: ReadonlyArray<{
@@ -35,6 +36,12 @@ export const INVENTORY_PERMISSIONS: ReadonlyArray<{
   {
     name: RESET_INVENTORY_DATA,
     description: "Wipe and reseed all inventory data. Admin-level action.",
+    resource: "inventory",
+  },
+  {
+    name: MANAGE_INVENTORY_APPROVAL_PROCESS,
+    description:
+      "Create, edit, activate and delete inventory approval processes (the Settings → Inventory Approvals config). Grant to inventory/admin roles.",
     resource: "inventory",
   },
 ];

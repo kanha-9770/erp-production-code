@@ -33,12 +33,16 @@ import type {
   InventoryMovement,
   MasterOption,
   MasterType,
+  SectionAccess,
   SubmoduleKey,
 } from "./types";
 
 interface InventoryContextValue {
   ready: boolean;
   masters: MasterType[];
+  /** Per-form-section edit access for the logged-in user — UI gating only.
+   *  A missing submodule/section means "open" (editable). */
+  sectionAccess: SectionAccess;
   /**
    * Capped in-memory item lists kept for pickers (e.g. the goods-movement form
    * links a movement to a store item). The main list view still pages via
@@ -101,6 +105,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     metal: [],
   });
   const [revalidateToken, setRevalidateToken] = useState(0);
+  // Empty until the permissions load — consumers treat a missing entry as open.
+  const [sectionAccess, setSectionAccess] = useState<SectionAccess>({} as SectionAccess);
 
   const bumpRevalidate = useCallback(() => setRevalidateToken((n) => n + 1), []);
 
@@ -128,6 +134,14 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .loadMovements()
       .then((mv) => {
         if (alive) setMovements(mv);
+      })
+      .catch(() => {});
+    // Section-level edit access (cheap; no records). Missing/failed → all open;
+    // the server re-checks every write regardless.
+    inventoryService
+      .loadPermissions()
+      .then(({ sectionAccess: sa }) => {
+        if (alive && sa) setSectionAccess(sa);
       })
       .catch(() => {});
     return () => {
@@ -445,6 +459,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const resetAll = useCallback(async () => {
     const snap = await inventoryService.reset();
     setMasters(snap.masters);
+    if (snap.sectionAccess) setSectionAccess(snap.sectionAccess);
     bumpRevalidate();
     toast({ title: "Inventory data reset", description: "Sample data has been restored." });
   }, [toast, bumpRevalidate]);
@@ -453,6 +468,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       masters,
+      sectionAccess,
       items,
       revalidateToken,
       bumpRevalidate,
@@ -476,6 +492,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     [
       ready,
       masters,
+      sectionAccess,
       items,
       revalidateToken,
       bumpRevalidate,

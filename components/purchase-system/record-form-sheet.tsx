@@ -29,14 +29,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, History, Sparkles, CheckCircle2, Boxes, Lock } from "lucide-react";
+import { Plus, History, Sparkles, CheckCircle2, Boxes, Lock, Info, Undo2, RotateCcw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePurchase, type ItemPurchaseHistory } from "@/lib/purchase-system/store";
+import { useToast } from "@/hooks/use-toast";
+import {
+  useRecallApprovalRequestMutation,
+  useResubmitApprovalMutation,
+} from "@/lib/api/approvals";
 import { formatMoney, formatDate, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
-import { deriveReceiptStatus } from "@/lib/purchase-system/receipt";
+import { asRows, deriveGrnReceiptStatus, grnItemRows } from "@/lib/purchase-system/receipt";
 import { Badge } from "@/components/ui/badge";
-import { MediaField } from "./media-field";
-import { LineItemsField } from "./line-items-field";
+import { MediaField, MediaGallery } from "./media-field";
+import { LineItemsField, LineItemsView } from "./line-items-field";
 import { StoreItemPicker, type SelectedStoreItem } from "./store-item-picker";
 import type { MediaRef } from "@/lib/purchase-system/media";
 import type { FieldDef, PurchaseRecord, SubmoduleSchema } from "@/lib/purchase-system/types";
@@ -102,20 +107,64 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     getItemHistory,
     currentUser,
     permissions,
+    sectionAccess,
     getPaymentPoOptions,
     getGrnInvoiceOptions,
     getPoTrace,
+    reload,
   } = usePurchase();
+  const { toast } = useToast();
+  const [recall, { isLoading: recalling }] = useRecallApprovalRequestMutation();
+  const [resubmit, { isLoading: resubmitting }] = useResubmitApprovalMutation();
+
+  // Approval state the record carries (server-written `_approval` marker).
+  const approval = (record as any)?._approval as
+    | { status?: string; requestId?: string; processName?: string; totalStages?: number; stage?: number; comment?: string }
+    | undefined;
+  const pendingApproval = approval?.status === "PENDING";
+  const rejectedApproval = approval?.status === "REJECTED";
+
+  const handleRecall = async () => {
+    if (!approval?.requestId) return;
+    try {
+      await recall({ id: approval.requestId }).unwrap();
+      toast({ title: "Request recalled", description: "The document is editable again." });
+      await reload();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not recall", description: e?.data?.error });
+    }
+  };
+  const handleResubmit = async () => {
+    if (!record) return;
+    try {
+      const res: any = await resubmit({ module: "purchase", recordId: record.id }).unwrap();
+      toast({ title: res?.data?.resubmitted ? "Resubmitted for approval" : "Document is live (no matching process)" });
+      await reload();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not resubmit", description: e?.data?.error });
+    }
+  };
 
   // Approval fields are privileged: lock them read-only for users who lack the
   // permission so they can't set a value the server would reject (403). Mirrors
   // guardedPermissionForPatch in lib/permissions/purchase-permissions.ts.
   const lockedByPermission = (f: FieldDef): boolean => {
     if (schema.key === "pr" && f.key === "productionApproval") return !permissions.approveRequisition;
+    // Recorded by the production manager at approval time.
+    if (schema.key === "pr" && f.key === "itemLocationKept") return !permissions.approveRequisition;
     if (schema.key === "po" && f.key === "approvalStatus") return !permissions.approvePo;
     if (schema.key === "grn" && f.key === "stockUpdated") return !permissions.postStock;
+    if (schema.key === "payment" && f.key === "status") return !permissions.approvePayment;
     return false;
   };
+
+  // Section-level edit access: a section an admin restricted (granted to
+  // specific roles/users) renders read-only for everyone else. Mirrors
+  // assertSectionEditsAllowed in lib/permissions/section-permissions.ts.
+  const sectionLocked = (section: string): boolean =>
+    pendingApproval || sectionAccess?.[schema.key]?.[section] === false;
   const [form, setForm] = useState<Record<string, unknown>>(() =>
     buildInitial(schema, record, initial, currentUser),
   );
@@ -183,14 +232,15 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
   }, [open, record, schema, initial, currentUser]);
 
   // Live-derive the GRN receipt status from the invoice/received quantities so
-  // the read-only badge updates as the user edits the lines.
+  // the read-only badge updates as the user edits the lines (either shape:
+  // invoice grid or flat challan / no-invoice lines).
   useEffect(() => {
     if (schema.key !== "grn") return;
     setForm((prev) => {
-      const next = deriveReceiptStatus(prev.lines);
+      const next = deriveGrnReceiptStatus(prev);
       return prev.receiptStatus === next ? prev : { ...prev, receiptStatus: next };
     });
-  }, [schema.key, form.lines]);
+  }, [schema.key, form.lines, form.receiptLines]);
 
   const sections = useMemo(() => {
     const order: string[] = [];
@@ -253,6 +303,23 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
                   : "";
         }
       }
+      // GRN: switching "Received Against" carries the already-entered receipt
+      // lines across shapes instead of dropping them — invoice grid rows
+      // flatten to plain item lines, and vice versa (after the clear above).
+      if (schema.key === "grn" && key === "receivedAgainst") {
+        const wasInvoice = String(prev.receivedAgainst ?? "INVOICE") === "INVOICE";
+        const isInvoice = String(value ?? "") === "INVOICE";
+        if (wasInvoice && !isInvoice) {
+          next.receiptLines = grnItemRows(prev);
+          next.lines = [];
+        } else if (!wasInvoice && isInvoice) {
+          const flat = asRows(prev.receiptLines);
+          next.lines = flat.length
+            ? [{ _id: rowUid(), invoiceNo: "", invoiceDate: "", items: flat }]
+            : [];
+          next.receiptLines = [];
+        }
+      }
       return next;
     });
     setErrors((prev) => (prev[key] ? { ...prev, [key]: "" } : prev));
@@ -290,17 +357,53 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     return true;
   };
 
+  // First missing required column across a lineItems value (recursing into
+  // nested lineItems columns). Required numbers must be > 0 (a zero quantity
+  // is as useless as a blank one).
+  const firstRowError = (field: FieldDef, value: unknown): string | null => {
+    const rows = asRows(value);
+    const noun = field.rowNoun ?? "Row";
+    for (let i = 0; i < rows.length; i++) {
+      for (const col of field.columns ?? []) {
+        if (col.type === "lineItems") {
+          const nested = firstRowError(col, rows[i][col.key]);
+          if (nested) return `${noun} ${i + 1} — ${nested}`;
+          continue;
+        }
+        if (!col.required) continue;
+        const v = rows[i][col.key];
+        if (col.type === "number" || col.type === "currency") {
+          if (!(Number(v) > 0)) return `${noun} ${i + 1}: ${col.label} must be greater than 0.`;
+        } else if (v == null || String(v).trim() === "") {
+          return `${noun} ${i + 1}: ${col.label} is required.`;
+        }
+      }
+    }
+    return null;
+  };
+
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     for (const f of schema.fields) {
-      if (!f.required || f.formHidden || !isVisible(f)) continue;
+      if (f.formHidden || !isVisible(f)) continue;
+      // Read-only for this user (permission / section lock) — they can't fix
+      // it, so don't block them on it; the value submits unchanged.
+      if (sectionLocked(f.section) || lockedByPermission(f)) continue;
       const v = form[f.key];
-      if (v == null || String(v).trim() === "") next[f.key] = `${f.label} is required`;
+      if (f.required && (v == null || String(v).trim() === "")) {
+        next[f.key] = `${f.label} is required`;
+        continue;
+      }
+      // Rows inside a line-items grid must fill their required columns too.
+      if (f.type === "lineItems") {
+        const rowError = firstRowError(f, v);
+        if (rowError) next[f.key] = rowError;
+      }
     }
     // A requisition must list at least one item in the subform.
-    if (schema.key === "pr") {
+    if (schema.key === "pr" && !sectionLocked("Item Details")) {
       const rows = Array.isArray(form.items) ? (form.items as unknown[]) : [];
-      if (rows.length === 0) next.items = "Add at least one item.";
+      if (rows.length === 0) next.items = next.items ?? "Add at least one item.";
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -344,6 +447,33 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-7">
+          {approval && (pendingApproval || rejectedApproval) && (
+            <div
+              className={cn(
+                "rounded-md border px-3 py-2.5 text-sm flex items-start gap-2",
+                pendingApproval
+                  ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                  : "border-destructive/40 bg-destructive/5 text-destructive",
+              )}
+            >
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="flex-1 space-y-0.5">
+                <div className="font-medium">
+                  {pendingApproval ? "Pending Approval" : "Approval Rejected"}
+                  {approval.processName ? ` · ${approval.processName}` : ""}
+                </div>
+                {pendingApproval && approval.totalStages ? (
+                  <div className="text-xs">
+                    Stage {(approval.stage ?? 0) + 1} of {approval.totalStages}. This document is read-only until approved —
+                    recall the request to edit it.
+                  </div>
+                ) : null}
+                {rejectedApproval && approval.comment ? (
+                  <div className="text-xs">Reason: “{approval.comment}”. Edit and save to resubmit, or use Reapply.</div>
+                ) : null}
+              </div>
+            </div>
+          )}
           {schema.key === "pr" && String(form.purchaseType ?? "NEW") === "REPEAT" && (
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
               <div className="flex items-start gap-3 min-w-0">
@@ -379,10 +509,16 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
           {sections.map((section) => {
             const visible = section.fields.filter(isShown);
             if (visible.length === 0) return null;
+            const secLocked = sectionLocked(section.name);
             return (
               <div key={section.name} className="space-y-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
                   {section.name}
+                  {secLocked && (
+                    <span className="inline-flex items-center gap-1 normal-case font-normal tracking-normal text-[11px]">
+                      <Lock className="h-3 w-3" /> view only — permission required
+                    </span>
+                  )}
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {visible.map((f) => (
@@ -395,7 +531,7 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
                       getMasterOptions={getMasterOptions}
                       onAddMasterOption={addMasterOption}
                       dynamicOptions={dynamicOptionsFor(f)}
-                      locked={lockedByPermission(f)}
+                      locked={secLocked || lockedByPermission(f)}
                     />
                   ))}
                 </div>
@@ -405,10 +541,30 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
         </div>
 
         <SheetFooter className="px-6 py-4 border-t flex-row justify-end gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit}>{record ? "Save changes" : `Create ${schema.recordNoun}`}</Button>
+          {pendingApproval ? (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+              <Button variant="outline" onClick={handleRecall} disabled={recalling} className="gap-1.5">
+                {recalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                Recall request
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              {rejectedApproval && (
+                <Button variant="outline" onClick={handleResubmit} disabled={resubmitting} className="gap-1.5">
+                  {resubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  Reapply
+                </Button>
+              )}
+              <Button onClick={handleSubmit}>{record ? "Save changes" : `Create ${schema.recordNoun}`}</Button>
+            </>
+          )}
         </SheetFooter>
       </SheetContent>
 
@@ -509,8 +665,12 @@ function FieldControl({
   const lockedLabel =
     field.type === "status"
       ? resolveStatus(field, value).label
-      : field.options?.find((o) => o.value === value)?.label ??
-        (value ? String(value) : "—");
+      : field.type === "checkbox"
+        ? value
+          ? "Yes"
+          : "No"
+        : field.options?.find((o) => o.value === value)?.label ??
+          (value ? String(value) : "—");
   return (
     <div className={cn("space-y-1.5", fullWidth && "sm:col-span-2")}>
       <Label className="text-sm">
@@ -520,12 +680,18 @@ function FieldControl({
 
       {locked ? (
         // Privileged field the user can't change — show the value read-only.
-        <div className="flex items-center gap-2 h-9">
-          <Badge variant="outline">{lockedLabel}</Badge>
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Lock className="h-3 w-3" /> permission required
-          </span>
-        </div>
+        field.type === "lineItems" ? (
+          <LineItemsView field={field} value={value} />
+        ) : field.type === "media" ? (
+          <MediaGallery value={value} />
+        ) : (
+          <div className="flex items-center gap-2 h-9">
+            <Badge variant="outline">{lockedLabel}</Badge>
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Lock className="h-3 w-3" /> permission required
+            </span>
+          </div>
+        )
       ) : field.type === "checkbox" ? (
         <div className="flex items-center h-9">
           <Checkbox
@@ -545,9 +711,11 @@ function FieldControl({
         ) : (
           <div className="text-sm h-9 flex items-center">{value ? String(value) : "—"}</div>
         )
-      ) : field.auto || field.prefillUser ? (
+      ) : field.auto || (field.prefillUser && value) ? (
         // Locked, system-set. `auto` = server-minted document number; `prefillUser`
-        // = pulled from the logged-in user (Requested By / Department). Read-only.
+        // = pulled from the logged-in user (Requested By / Department). Read-only
+        // when the profile actually supplied a value — an empty prefill (e.g. no
+        // department on the profile) falls through to a normal editable control.
         <Input
           value={(value as string) ?? ""}
           readOnly

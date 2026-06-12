@@ -91,16 +91,21 @@ const STEPS: Step[] = [
     what: "When goods arrive, the store records the receipt and posts it to inventory, which raises stock.",
     action: 'On the PO click "Receive (GRN)", complete it, then "Post to inventory".',
     result: "Received → Stock Updated",
-    sub: ["Gate Entry", "Inspection", "Received", "Post to inventory (stock ↑)"],
+    sub: [
+      "Gate entry (company person / others, box & part count)",
+      "Receive against Invoice / Challan / No Invoice",
+      "Inspection",
+      "Post to inventory (stock ↑)",
+    ],
   },
   {
     title: "Pay the supplier",
     who: "Accounts",
     icon: Banknote,
     ring: "bg-fuchsia-500",
-    what: "Accounts raises a payment against the PO/GRN invoice. A payment can also be raised directly from the PO for an advance.",
+    what: "Accounts raises a payment against the PO/GRN invoice (or directly from the PO for an advance). Moving it on — Approve / Hold / Reject / Mark paid — needs the Approve Payment Request permission.",
     action: 'Click "Raise Payment" on the GRN (or on the PO).',
-    result: "Requested → Paid",
+    result: "Requested → Approved → Paid",
   },
 ];
 
@@ -112,7 +117,7 @@ const ROLES: Array<{ name: string; can: string }> = [
   { name: "Buyer (Process Purchase)", can: "Raise RFQs, create & convert POs, manage suppliers, edit/delete docs." },
   { name: "Purchase Manager", can: "Approve purchase orders (authorise the spend)." },
   { name: "Store Keeper", can: "Receive GRNs, post goods to inventory, manage stock movements." },
-  { name: "Accounts", can: "Raise and process payment requests." },
+  { name: "Accounts", can: "Raise payment requests; approving / paying needs Approve Payment Request." },
 ];
 
 export function WorkflowGuide() {

@@ -73,6 +73,8 @@ import {
   deriveStockStatus,
   STATUS_LABEL,
   STATUS_VARIANT,
+  getApprovalMeta,
+  APPROVAL_BADGE,
 } from "@/lib/inventory-system/format";
 import type {
   FieldDef,
@@ -107,6 +109,11 @@ function cellFor(field: FieldDef, item: InventoryItem): React.ReactNode {
     );
   }
   if (field.type === "status") {
+    const a = getApprovalMeta(item);
+    if (a && (a.status === "PENDING" || a.status === "REJECTED")) {
+      const b = APPROVAL_BADGE[a.status];
+      return <Badge variant={b.variant}>{b.label}</Badge>;
+    }
     const s = deriveStockStatus(item);
     return <Badge variant={STATUS_VARIANT[s]}>{STATUS_LABEL[s]}</Badge>;
   }
