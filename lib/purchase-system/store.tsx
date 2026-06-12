@@ -490,7 +490,10 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       const received = byPo.get(docNo) ?? 0;
       const balance = qty > 0 ? qty - received : 0;
       const open = qty <= 0 ? true : received < qty; // partial & not-started stay
-      if (open || docNo === includeValue) {
+      // Only APPROVED POs may be received against. `includeValue` keeps a PO that
+      // an existing GRN already references visible while editing it.
+      const approved = String(po.approvalStatus ?? "").toUpperCase() === "APPROVED";
+      if ((open && approved) || docNo === includeValue) {
         const item = po.itemName ? ` · ${String(po.itemName)}` : "";
         const bal = qty > 0 ? ` · bal ${Math.max(0, balance)}` : "";
         out.push({ value: docNo, label: `${docNo}${item}${bal}`, balance: Math.max(0, balance) });

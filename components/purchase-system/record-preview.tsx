@@ -76,7 +76,13 @@ export function RecordPreview({
   const canPromoteTo = (to: string) =>
     to === "grn" ? permissions.postStock : to === "payment" ? permissions.raisePayment : permissions.process;
 
-  const promotions = (onPromote ? promotionsFor(schema.key) : []).filter((p) => canPromoteTo(p.to));
+  // A PO must be APPROVED before goods can be received against it (GRN). An
+  // unapproved PO hides its "Receive (GRN)" step; the server enforces this too.
+  const poApproved = String(record.approvalStatus ?? "").toUpperCase() === "APPROVED";
+  const receiveBlocked = schema.key === "po" && !poApproved;
+  const promotions = (onPromote ? promotionsFor(schema.key) : []).filter(
+    (p) => canPromoteTo(p.to) && !(p.to === "grn" && receiveBlocked),
+  );
   const stockPosted = String(record.stockUpdated ?? "NO") === "YES";
   const sections: Array<{ name: string; fields: FieldDef[] }> = [];
   for (const f of schema.fields) {
@@ -214,7 +220,7 @@ export function RecordPreview({
           </span>
         ) : null)}
 
-      {(promotions.length > 0 || onPostStock) && record.docNo ? (
+      {(promotions.length > 0 || onPostStock || (receiveBlocked && permissions.postStock)) && record.docNo ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Next step
@@ -225,6 +231,11 @@ export function RecordPreview({
                 {p.label} <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
               </Button>
             ))}
+            {receiveBlocked && permissions.postStock ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Lock className="h-3.5 w-3.5" /> Approve this PO (Approval = Approved) before it can be received
+              </span>
+            ) : null}
             {onPostStock ? (
               stockPosted ? (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">

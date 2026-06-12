@@ -29,6 +29,7 @@ interface AnyField {
   key: string;
   type: string;
   section: string;
+  master?: string;
   defaultValue?: string | number;
   auto?: boolean;
   computed?: boolean;
@@ -228,6 +229,10 @@ export async function assertSectionEditsAllowed(opts: {
   const touched = new Map<string, string>(); // permission name → section
   for (const f of fields) {
     if (f.auto || f.computed || f.prefillUser) continue;
+    // The Vendor field is exempt from section-permission locking — every user may
+    // pick a vendor in any form (vendors are added only in Vendor Master). Mirrors
+    // the client exemption in components/purchase-system/record-form-sheet.tsx.
+    if (f.type === "master" && f.master === "supplier") continue;
     if (!Object.prototype.hasOwnProperty.call(patch, f.key)) continue;
     const base =
       existing && Object.prototype.hasOwnProperty.call(existing, f.key)

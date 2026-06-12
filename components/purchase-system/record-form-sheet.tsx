@@ -165,6 +165,19 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
   // assertSectionEditsAllowed in lib/permissions/section-permissions.ts.
   const sectionLocked = (section: string): boolean =>
     pendingApproval || sectionAccess?.[schema.key]?.[section] === false;
+
+  // The Vendor field is managed in Vendor Master and must be selectable by every
+  // user in every form — so it is EXEMPT from section-permission locking (it still
+  // locks while the whole document is pending approval). Mirrors the same exemption
+  // in assertSectionEditsAllowed. Vendors are ADDED only in Vendor Master; here you
+  // just pick one.
+  const isVendorField = (f: FieldDef): boolean => f.type === "master" && f.master === "supplier";
+  const fieldLocked = (f: FieldDef, section: string): boolean => {
+    if (lockedByPermission(f)) return true;
+    if (pendingApproval) return true; // whole document is read-only while pending
+    if (isVendorField(f)) return false; // Vendor always selectable
+    return sectionAccess?.[schema.key]?.[section] === false;
+  };
   const [form, setForm] = useState<Record<string, unknown>>(() =>
     buildInitial(schema, record, initial, currentUser),
   );
@@ -387,8 +400,9 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     for (const f of schema.fields) {
       if (f.formHidden || !isVisible(f)) continue;
       // Read-only for this user (permission / section lock) — they can't fix
-      // it, so don't block them on it; the value submits unchanged.
-      if (sectionLocked(f.section) || lockedByPermission(f)) continue;
+      // it, so don't block them on it; the value submits unchanged. (The Vendor
+      // field stays editable even in a locked section, so it IS validated.)
+      if (fieldLocked(f, f.section)) continue;
       const v = form[f.key];
       if (f.required && (v == null || String(v).trim() === "")) {
         next[f.key] = `${f.label} is required`;
@@ -531,7 +545,7 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
                       getMasterOptions={getMasterOptions}
                       onAddMasterOption={addMasterOption}
                       dynamicOptions={dynamicOptionsFor(f)}
-                      locked={secLocked || lockedByPermission(f)}
+                      locked={fieldLocked(f, section.name)}
                     />
                   ))}
                 </div>
@@ -868,18 +882,27 @@ function MasterSelect({
             {o.value}
           </SelectItem>
         ))}
-        <div className="border-t mt-1 pt-1">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-primary hover:bg-accent"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setAdding(true);
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add new value
-          </button>
-        </div>
+        {/* Vendors are a first-class entity — add them in Vendor Master (a
+            permitted action), never ad-hoc here (that would orphan the value).
+            Every other master keeps its inline "Add new value". */}
+        {masterKey === "supplier" ? (
+          <div className="border-t mt-1 pt-1 px-2 py-1.5 text-xs text-muted-foreground">
+            {options.length === 0 ? "No vendors yet — " : ""}Add vendors in Vendor Master
+          </div>
+        ) : (
+          <div className="border-t mt-1 pt-1">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-primary hover:bg-accent"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setAdding(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add new value
+            </button>
+          </div>
+        )}
       </SelectContent>
     </Select>
   );

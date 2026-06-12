@@ -217,6 +217,44 @@ async function reconcilePoClosure(organizationId: string, poRefs: string[]): Pro
   }
 }
 
+/** Thrown when a GRN tries to receive against a PO that isn't approved yet → 403. */
+class UnapprovedPoReceiveError extends Error {
+  readonly forbidden = true;
+  constructor(refs: string[]) {
+    const list = refs.join(", ");
+    super(
+      refs.length > 1
+        ? `These purchase orders must be approved before goods can be received against them: ${list}.`
+        : `Purchase order ${list} must be approved before goods can be received against it.`,
+    );
+    this.name = "UnapprovedPoReceiveError";
+  }
+}
+
+/**
+ * Block receiving against an unapproved PO: every supplied poRef that matches a
+ * KNOWN PO in this org must have `approvalStatus === "APPROVED"`. Callers pass the
+ * NEWLY-added refs (diffed against the existing GRN) so re-saving never re-checks
+ * an already-booked line. Refs that don't match any PO are left alone (treated as
+ * external/manual references, validated elsewhere).
+ */
+async function assertGrnPosApproved(organizationId: string, refs: string[]): Promise<void> {
+  const want = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  if (want.length === 0) return;
+  const pos = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "po" },
+    select: { data: true },
+  });
+  const approvedByDocNo = new Map<string, boolean>(); // docNo → is approved
+  for (const po of pos) {
+    const d = (po.data as Record<string, unknown>) ?? {};
+    const docNo = String(d.docNo ?? "").trim();
+    if (docNo) approvedByDocNo.set(docNo, String(d.approvalStatus ?? "").toUpperCase() === "APPROVED");
+  }
+  const blocked = want.filter((r) => approvedByDocNo.get(r) === false);
+  if (blocked.length > 0) throw new UnapprovedPoReceiveError(blocked);
+}
+
 export const PurchaseHandlers = {
   async load(ctx: PurCtx): Promise<PurchaseSnapshot> {
     await seedIfFirstLoad(ctx);
@@ -315,6 +353,8 @@ export const PurchaseHandlers = {
       existing: null,
       patch: clean,
     });
+    // A GRN may only receive against an APPROVED purchase order.
+    if (submodule === "grn") await assertGrnPosApproved(ctx.organizationId, grnPoRefs(clean));
 
     // User-derived fields ("Requested By", Department) are authoritative: resolve
     // them from the authenticated user and overwrite any client-sent value, so
@@ -436,6 +476,13 @@ export const PurchaseHandlers = {
     });
 
     const merged = { ...existingData, ...cleanPatch };
+
+    // A GRN may only receive against an APPROVED PO — check only the newly-added
+    // PO refs so re-saving a GRN with already-booked lines never re-validates them.
+    if (submodule === "grn") {
+      const before = new Set(grnPoRefs(existingData));
+      await assertGrnPosApproved(ctx.organizationId, grnPoRefs(merged).filter((r) => !before.has(r)));
+    }
 
     // Admin force-edit while pending: persist the change but keep it pending.
     if (isPending) {
