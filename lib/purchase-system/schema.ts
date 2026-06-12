@@ -257,6 +257,17 @@ const PARTIAL_PAYMENT_TERMS = [
   "Partial Advance + Balance Against B/L",
 ];
 
+/**
+ * Payment terms that require an advance to be paid up-front — i.e. goods may only
+ * be received once an approved advance payment exists. "Credit" / "100% Against
+ * B/L" are NOT advance terms (payment follows receipt), so they never gate
+ * receiving. Used by the advance-paid receiving gate (api-handlers + preview).
+ */
+export const ADVANCE_PAYMENT_TERMS = ["100% Advance", ...PARTIAL_PAYMENT_TERMS];
+export function isAdvancePaymentTerm(term: string | null | undefined): boolean {
+  return ADVANCE_PAYMENT_TERMS.includes(String(term ?? ""));
+}
+
 // Repeatable contact rows for the Vendor Master ("Add contact" button).
 const CONTACT_COLUMNS: FieldDef[] = [
   { key: "contactPerson", label: "Contact Person", type: "text", section: "line", required: true },
