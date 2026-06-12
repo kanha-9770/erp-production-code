@@ -101,19 +101,24 @@ export function RecordPreview({
   };
   const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, controllingValue(f));
 
-  // Payment approval — the permitted approver acts straight from the preview.
+  // Payment workflow — split by role: the APPROVAL decisions (approve / hold /
+  // reject) belong to the approver (approvePayment — admin / a given user); once
+  // approved, the account manager who raised it (raisePayment) marks it PAID.
   const paymentStatus = schema.key === "payment" ? String(record.status ?? "") : null;
+  const canMarkPaid = permissions.raisePayment || permissions.approvePayment;
   const paymentActions: Array<{ status: string; label: string; icon: React.ReactNode }> =
-    schema.key === "payment" && onSetStatus && permissions.approvePayment
+    schema.key === "payment" && onSetStatus
       ? paymentStatus === "REQUESTED" || paymentStatus === "ON_HOLD"
-        ? [
-            { status: "APPROVED", label: "Approve payment", icon: <BadgeCheck className="h-3.5 w-3.5 mr-1.5" /> },
-            ...(paymentStatus === "REQUESTED"
-              ? [{ status: "ON_HOLD", label: "Put on hold", icon: <Loader2 className="h-3.5 w-3.5 mr-1.5" /> }]
-              : []),
-            { status: "REJECTED", label: "Reject", icon: <Ban className="h-3.5 w-3.5 mr-1.5" /> },
-          ]
-        : paymentStatus === "APPROVED"
+        ? permissions.approvePayment
+          ? [
+              { status: "APPROVED", label: "Approve payment", icon: <BadgeCheck className="h-3.5 w-3.5 mr-1.5" /> },
+              ...(paymentStatus === "REQUESTED"
+                ? [{ status: "ON_HOLD", label: "Put on hold", icon: <Loader2 className="h-3.5 w-3.5 mr-1.5" /> }]
+                : []),
+              { status: "REJECTED", label: "Reject", icon: <Ban className="h-3.5 w-3.5 mr-1.5" /> },
+            ]
+          : []
+        : paymentStatus === "APPROVED" && canMarkPaid
           ? [{ status: "PAID", label: "Mark as paid", icon: <Banknote className="h-3.5 w-3.5 mr-1.5" /> }]
           : []
       : [];
@@ -202,6 +207,10 @@ export function RecordPreview({
         ) : !permissions.approvePayment && (paymentStatus === "REQUESTED" || paymentStatus === "ON_HOLD") ? (
           <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
             <Lock className="h-3.5 w-3.5" /> Approver permission required to act on this payment
+          </span>
+        ) : !canMarkPaid && paymentStatus === "APPROVED" ? (
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" /> Account-manager permission required to mark this payment paid
           </span>
         ) : null)}
 

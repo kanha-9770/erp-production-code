@@ -39,8 +39,10 @@ export const GUARDED_FIELDS: Record<string, { field: string; permission: string 
   pr: { field: "productionApproval", permission: APPROVE_PURCHASE_REQUISITION },
   po: { field: "approvalStatus", permission: APPROVE_PURCHASE_ORDER },
   grn: { field: "stockUpdated", permission: POST_GRN_STOCK },
-  // A payment request's workflow status: only approvers may move it past
-  // REQUESTED (approve / hold / pay / reject).
+  // Payment status on CREATE / import: minting a payment already past REQUESTED
+  // (incl. pre-PAID) is an approver-level back-door, so it needs APPROVE_PAYMENT_
+  // REQUEST. The UPDATE path is finer-grained — see paymentStatusPermission()
+  // (PAID → account manager; approve/hold/reject → approver).
   payment: { field: "status", permission: APPROVE_PAYMENT_REQUEST },
 };
 
@@ -197,13 +199,13 @@ export const PURCHASE_PERMISSIONS: ReadonlyArray<{
   {
     name: RAISE_PAYMENT_REQUEST,
     description:
-      "Raise a payment request against a PO/GRN. Grant to accounts-payable / purchase roles.",
+      "Raise a payment request against a PO/GRN, and mark an approved request as PAID. Grant to accounts-payable / account-manager roles.",
     resource: "purchase",
   },
   {
     name: APPROVE_PAYMENT_REQUEST,
     description:
-      "Approve, hold, reject or mark-paid a payment request (set its status). Grant to finance-approver roles.",
+      "Approve, hold or reject a payment request (the approval decision). Marking it PAID is the account manager's RAISE_PAYMENT_REQUEST. Grant to finance-approver / admin roles.",
     resource: "purchase",
   },
   {
@@ -296,9 +298,25 @@ export async function getPurchasePermissions(
 function isPrivilegedValue(field: string, v: unknown): boolean {
   const s = String(v ?? "").trim().toUpperCase();
   if (field === "stockUpdated") return s === "YES";
-  // Payment status: anything past the initial "REQUESTED" is an approver move.
+  // Payment status: anything past the initial "REQUESTED" is privileged.
   if (field === "status") return ["APPROVED", "REJECTED", "PAID", "ON_HOLD"].includes(s);
   return s === "APPROVED" || s === "REJECTED";
+}
+
+/**
+ * A payment request's `status` splits by TARGET value: the approval DECISIONS
+ * (Approved / On Hold / Rejected) are reserved to the approver (`APPROVE_PAYMENT_
+ * REQUEST` — admin / a given user), while marking a payment PAID is the account
+ * manager's job (`RAISE_PAYMENT_REQUEST` — the same role that raised it, paying
+ * out only AFTER it's approved). Returns the permission a target value demands,
+ * or null for the benign "REQUESTED" default. One source of truth for the form
+ * lock, the preview buttons and the server gate.
+ */
+export function paymentStatusPermission(value: unknown): string | null {
+  const s = String(value ?? "").trim().toUpperCase();
+  if (s === "PAID") return RAISE_PAYMENT_REQUEST;
+  if (s === "APPROVED" || s === "ON_HOLD" || s === "REJECTED") return APPROVE_PAYMENT_REQUEST;
+  return null;
 }
 
 /**
@@ -360,6 +378,15 @@ export function guardedPermissionForPatch(
   existing: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): string | null {
+  // Payment status splits by target value (PAID → account manager; approve/hold/
+  // reject → approver), so it needs its own resolver, not the single-permission
+  // GUARDED_FIELDS entry.
+  if (submodule === "payment") {
+    const changed =
+      Object.prototype.hasOwnProperty.call(patch, "status") &&
+      String(patch.status ?? "") !== String(existing.status ?? "");
+    return changed ? paymentStatusPermission(patch.status) : null;
+  }
   const g = GUARDED_FIELDS[submodule];
   if (g) {
     const changed =

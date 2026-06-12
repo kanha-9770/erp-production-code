@@ -16,8 +16,6 @@ import { seedRecords } from "@/lib/purchase-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
 import {
   POST_GRN_STOCK,
-  APPROVE_PURCHASE_REQUISITION,
-  APPROVE_PURCHASE_ORDER,
   getPurchasePermissions,
   guardedPermissionForCreate,
   guardedPermissionForPatch,
@@ -255,23 +253,19 @@ export const PurchaseHandlers = {
     }
     for (const k of SUBMODULE_ORDER) records[k] ??= [];
 
-    const [currentUser, basePermissions, sectionAccess, engineOnly] = await Promise.all([
+    const [currentUser, permissions, sectionAccess] = await Promise.all([
       resolveUserIdentity(ctx.userId),
       getPurchasePermissions(ctx.userId),
       getSectionAccess(ctx.userId, ctx.organizationId, "purchase"),
-      approvalsEngineOnly(ctx.organizationId),
     ]);
-    // Engine-only mode: the payment approval FIELD is no longer permission-gated
-    // (the approval-process engine controls it) — unlock it in the UI.
-    // EXCEPTIONS that stay gated even under engine-only: GRN stock-posting
-    // (postStock — a real inventory action), the PR's approval fields
-    // (approveRequisition — Production Approval / Item Location Kept) and the PO's
-    // approval field (approvePo — Approval), reserved to the designated approver
-    // (admin / CEO / whoever holds the permission). Mirrors the server gate in
-    // createRecord/updateRecord below.
-    const permissions = engineOnly
-      ? { ...basePermissions, approvePayment: true }
-      : basePermissions;
+    // Every privileged purchase FIELD is now reserved to its named permission even
+    // under engine-only — GRN stock-posting (postStock), the PR approval
+    // (approveRequisition — Production Approval / Item Location Kept), the PO
+    // approval (approvePo) and the payment status (approvePayment for the approval
+    // decision; raisePayment for marking PAID). So the snapshot sends the user's
+    // real permissions verbatim (no engine-only field unlock) and the UI locks
+    // each field accordingly. Mirrors the server gate in createRecord/updateRecord.
+    // (Engine-only still relaxes the role-hierarchy gate, handled in those gates.)
 
     return {
       version: SNAPSHOT_VERSION,
@@ -294,18 +288,12 @@ export const PurchaseHandlers = {
     // Block creating a record already pre-approved / pre-posted to skip the gate;
     // benign defaults (PENDING/NO) pass through without a permission.
     const createNeeds = guardedPermissionForCreate(submodule, clean);
-    // Engine-only mode skips the legacy field gate (the approval-process engine
-    // is the sole approval gate) — except GRN stock-posting (a real inventory
-    // action) and the PR/PO approvals (reserved to their designated approver),
-    // which stay gated regardless.
+    // Every privileged purchase field is reserved to its named permission even
+    // under engine-only (GRN stock-posting + the PR/PO/payment approvals), so the
+    // field gate always applies. Engine-only only relaxes the role-hierarchy gate
+    // below (the approval-process engine still routes who decides).
     const createEngineOnly = await approvalsEngineOnly(ctx.organizationId);
-    if (
-      createNeeds &&
-      (!createEngineOnly ||
-        createNeeds === POST_GRN_STOCK ||
-        createNeeds === APPROVE_PURCHASE_REQUISITION ||
-        createNeeds === APPROVE_PURCHASE_ORDER)
-    ) {
+    if (createNeeds) {
       await requirePurchasePermission(ctx.userId, createNeeds);
       // Closing the create-time back-door under hierarchy mode: you can't mint a
       // pre-approved document (you'd be approving your own — never a subordinate's).
@@ -418,19 +406,13 @@ export const PurchaseHandlers = {
     // the matching named permission (or admins/owner) may flip them. An ordinary
     // edit that doesn't touch a guarded field needs no special permission.
     const needed = guardedPermissionForPatch(submodule, existingData, cleanPatch);
-    // Engine-only mode: the approval-process engine is the sole approval gate, so
-    // the legacy field-permission check is skipped (no configured process ⇒ the
-    // field is freely editable) — except GRN stock-posting (a real inventory
-    // action) and the PR/PO approvals (reserved to their designated approver),
-    // which stay gated regardless.
+    // Every privileged purchase field is reserved to its named permission even
+    // under engine-only — GRN stock-posting, the PR/PO approvals, and the payment
+    // status (approve/hold/reject → APPROVE_PAYMENT_REQUEST; mark PAID →
+    // RAISE_PAYMENT_REQUEST). So the field gate always applies; engine-only only
+    // relaxes the role-hierarchy gate below.
     const editEngineOnly = await approvalsEngineOnly(ctx.organizationId);
-    if (
-      needed &&
-      (!editEngineOnly ||
-        needed === POST_GRN_STOCK ||
-        needed === APPROVE_PURCHASE_REQUISITION ||
-        needed === APPROVE_PURCHASE_ORDER)
-    ) {
+    if (needed) {
       await requirePurchasePermission(ctx.userId, needed);
       // Legacy mode only: an approver may act only on documents raised by their
       // own subordinates (role hierarchy) when the org enabled that gate.

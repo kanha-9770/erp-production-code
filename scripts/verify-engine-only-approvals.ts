@@ -1,22 +1,30 @@
 /**
- * Verify ENGINE-ONLY purchase approvals against the REAL handler.
+ * Verify purchase APPROVAL gating against the REAL handler (under engine-only).
  *
- * With setup.approvals.engineOnly = true, the legacy named-permission field gate
- * is OFF for the payment approval status: a user with NO approval permission can
- * set a Payment's status when no approval-process is configured (so the approval
- * pages are the sole control). EXCEPTIONS that stay gated regardless: GRN stock-
- * posting, the PR's approval (Production Approval / Item Location Kept) and the
- * PO's approval (Approval field), each reserved to its designated approver.
- * Toggling engineOnly off restores the payment gate too.
+ * Every privileged purchase FIELD is reserved to its named permission even with
+ * setup.approvals.engineOnly = true — engine-only no longer unlocks any approval
+ * field (it only relaxes the role-hierarchy gate). A no-permission user is blocked
+ * from: PR Production Approval + Item Location Kept, PO Approval, payment status
+ * (Approved/Paid) and GRN stock-posting.
  *
- * Creates throwaway records + a no-permission user, exercises updateRecord, and
- * cleans up. Leaves the org with engineOnly = true.
+ * The payment status SPLITS by target value:
+ *   - Approve / Hold / Reject  → APPROVE_PAYMENT_REQUEST (admin / a given user)
+ *   - mark PAID                → RAISE_PAYMENT_REQUEST   (the account manager)
+ * so an approver-only user can Approve but not Pay, and a raise-only user (account
+ * manager) can Pay an approved request but not Approve.
+ *
+ * Creates throwaway records + scoped users, exercises updateRecord, cleans up.
+ * Leaves the org with engineOnly = true.
  *
  *   npx tsx scripts/verify-engine-only-approvals.ts --org "Nessco Groupo"
  */
 import { prisma } from "@/lib/prisma";
 import { PurchaseHandlers } from "@/lib/api-handlers/purchase-system";
-import { approvalsEngineOnly } from "@/lib/permissions/purchase-permissions";
+import {
+  approvalsEngineOnly,
+  APPROVE_PAYMENT_REQUEST,
+  RAISE_PAYMENT_REQUEST,
+} from "@/lib/permissions/purchase-permissions";
 
 const TAG = `engonly-${Date.now()}`;
 let pass = 0, fail = 0;
@@ -29,12 +37,20 @@ async function setEngineOnly(orgId: string, on: boolean) {
   await prisma.organization.update({ where: { id: orgId }, data: { setup: setup as any } });
 }
 
+/** Grant a named permission to a user via an override. False if the perm is absent. */
+async function grantPerm(orgId: string, userId: string, name: string): Promise<boolean> {
+  const perm = await prisma.permission.findFirst({ where: { organizationId: orgId, name }, select: { id: true } });
+  if (!perm) return false;
+  await prisma.userPermissionOverride.create({ data: { userId, permissionId: perm.id, granted: true, reason: "engine-only verification" } });
+  return true;
+}
+
 async function main() {
   const i = process.argv.indexOf("--org");
   const orgName = i >= 0 ? process.argv[i + 1] : "Nessco Groupo";
   const org = await prisma.organization.findFirst({ where: { name: orgName } });
   if (!org) throw new Error(`Org "${orgName}" not found`);
-  console.log(`\n=== ${org.name} — engine-only approvals ===\n`);
+  console.log(`\n=== ${org.name} — purchase approval gating (engine-only) ===\n`);
 
   await setEngineOnly(org.id, true);
   check("Org flag engineOnly is ON", await approvalsEngineOnly(org.id));
@@ -43,28 +59,36 @@ async function main() {
   check("No active PR/PO/payment process (so nothing parks the edit)", activeProc === 0, `found ${activeProc}`);
 
   const created: string[] = [];
-  let userId = "";
+  const users: string[] = [];
+  const mkPayment = async (uid: string, status: string) => {
+    const r = await prisma.purchaseRecord.create({
+      data: { organizationId: org.id, submodule: "payment", status, createdById: uid,
+        data: { docNo: `${TAG}-PAY-${status}-${created.length}`, status } },
+    });
+    created.push(r.id);
+    return r.id;
+  };
   try {
     const u = await prisma.user.create({ data: { email: `${TAG}@example.invalid`, organizationId: org.id, first_name: "NoPerms" } });
-    userId = u.id;
-    const ctx = { organizationId: org.id, userId };
+    users.push(u.id);
+    const ctx = { organizationId: org.id, userId: u.id };
 
-    // ENGINE-ONLY: a no-permission user CAN set a Payment's approval status
-    // directly (the approval-process engine is the sole control; no process ⇒ open).
-    const pay = await prisma.purchaseRecord.create({
-      data: { organizationId: org.id, submodule: "payment", status: "REQUESTED", createdById: u.id,
-        data: { docNo: `${TAG}-PAY`, status: "REQUESTED" } },
-    });
-    created.push(pay.id);
+    // ── No-permission user is BLOCKED from every approval field ──────────────
+    const payA = await mkPayment(u.id, "REQUESTED");
     try {
-      const res: any = await PurchaseHandlers.updateRecord(ctx, pay.id, "payment", { status: "APPROVED" });
-      check("No-permission user CAN set payment status (engine-only, no process)", res?.status === "APPROVED", `got ${JSON.stringify(res?.status)}`);
+      await PurchaseHandlers.updateRecord(ctx, payA, "payment", { status: "APPROVED" });
+      check("No-permission user is BLOCKED from approving a payment", false, "was allowed");
     } catch (e: any) {
-      check("No-permission user CAN set payment status (engine-only, no process)", false, `${e?.name}: ${e?.message}`);
+      check("No-permission user is BLOCKED from approving a payment", e?.forbidden === true, `${e?.name}: ${e?.message}`);
+    }
+    const payB = await mkPayment(u.id, "APPROVED");
+    try {
+      await PurchaseHandlers.updateRecord(ctx, payB, "payment", { status: "PAID" });
+      check("No-permission user is BLOCKED from marking a payment paid", false, "was allowed");
+    } catch (e: any) {
+      check("No-permission user is BLOCKED from marking a payment paid", e?.forbidden === true, `${e?.name}: ${e?.message}`);
     }
 
-    // PO approval is ALWAYS gated, even under engine-only: the Approval field is
-    // reserved to the designated approver (APPROVE_PURCHASE_ORDER).
     const po = await prisma.purchaseRecord.create({
       data: { organizationId: org.id, submodule: "po", status: "DRAFT", createdById: u.id,
         data: { docNo: `${TAG}-PO`, status: "DRAFT", approvalStatus: "PENDING" } },
@@ -77,9 +101,6 @@ async function main() {
       check("No-permission user is BLOCKED from PO approvalStatus (always gated)", e?.forbidden === true, `${e?.name}: ${e?.message}`);
     }
 
-    // PR approval is ALWAYS gated (like GRN stock-posting), even under engine-only:
-    // Production Approval and Item Location Kept are reserved to the production
-    // head/manager (APPROVE_PURCHASE_REQUISITION).
     const pr = await prisma.purchaseRecord.create({
       data: { organizationId: org.id, submodule: "pr", status: "SUBMITTED", createdById: u.id,
         data: { docNo: `${TAG}-PR`, status: "SUBMITTED", productionApproval: "PENDING" } },
@@ -98,7 +119,6 @@ async function main() {
       check("No-permission user is BLOCKED from PR itemLocationKept (always gated)", e?.forbidden === true, `${e?.name}: ${e?.message}`);
     }
 
-    // GRN stock-posting stays gated even under engine-only.
     const grn = await prisma.purchaseRecord.create({
       data: { organizationId: org.id, submodule: "grn", status: "RECEIVED", createdById: u.id,
         data: { docNo: `${TAG}-GRN`, status: "RECEIVED", stockUpdated: "NO" } },
@@ -111,22 +131,56 @@ async function main() {
       check("GRN stock-posting still blocked for no-permission user", e?.forbidden === true, `${e?.name}: ${e?.message}`);
     }
 
-    // LEGACY mode: flip engineOnly off → the payment gate returns too.
-    await setEngineOnly(org.id, false);
-    const pay2 = await prisma.purchaseRecord.create({
-      data: { organizationId: org.id, submodule: "payment", status: "REQUESTED", createdById: u.id,
-        data: { docNo: `${TAG}-PAY2`, status: "REQUESTED" } },
-    });
-    created.push(pay2.id);
-    try {
-      await PurchaseHandlers.updateRecord(ctx, pay2.id, "payment", { status: "APPROVED" });
-      check("Legacy mode: no-permission user is BLOCKED on payment again", false, "was allowed");
-    } catch (e: any) {
-      check("Legacy mode: no-permission user is BLOCKED on payment again", e?.forbidden === true, `${e?.name}: ${e?.message}`);
+    // ── Payment SPLIT: approver can Approve (not Pay); account manager can Pay
+    //    an approved request (not Approve) ───────────────────────────────────
+    const approver = await prisma.user.create({ data: { email: `${TAG}-appr@example.invalid`, organizationId: org.id, first_name: "Approver" } });
+    users.push(approver.id);
+    const acct = await prisma.user.create({ data: { email: `${TAG}-acct@example.invalid`, organizationId: org.id, first_name: "AcctMgr" } });
+    users.push(acct.id);
+    const gotApprove = await grantPerm(org.id, approver.id, APPROVE_PAYMENT_REQUEST);
+    const gotRaise = await grantPerm(org.id, acct.id, RAISE_PAYMENT_REQUEST);
+
+    if (!gotApprove || !gotRaise) {
+      check("Payment split — named permissions present in org", false, `approve=${gotApprove} raise=${gotRaise} (run setup-purchase-approvals first)`);
+    } else {
+      const approverCtx = { organizationId: org.id, userId: approver.id };
+      const acctCtx = { organizationId: org.id, userId: acct.id };
+
+      const p1 = await mkPayment(u.id, "REQUESTED");
+      try {
+        const r: any = await PurchaseHandlers.updateRecord(approverCtx, p1, "payment", { status: "APPROVED" });
+        check("Approver (APPROVE_PAYMENT_REQUEST) CAN approve a payment", r?.status === "APPROVED", `got ${JSON.stringify(r?.status)}`);
+      } catch (e: any) {
+        check("Approver (APPROVE_PAYMENT_REQUEST) CAN approve a payment", false, `${e?.name}: ${e?.message}`);
+      }
+      const p2 = await mkPayment(u.id, "APPROVED");
+      try {
+        await PurchaseHandlers.updateRecord(approverCtx, p2, "payment", { status: "PAID" });
+        check("Approver (no RAISE) is BLOCKED from marking paid", false, "was allowed");
+      } catch (e: any) {
+        check("Approver (no RAISE) is BLOCKED from marking paid", e?.forbidden === true, `${e?.name}: ${e?.message}`);
+      }
+      const p3 = await mkPayment(u.id, "APPROVED");
+      try {
+        const r: any = await PurchaseHandlers.updateRecord(acctCtx, p3, "payment", { status: "PAID" });
+        check("Account manager (RAISE_PAYMENT_REQUEST) CAN mark an approved payment paid", r?.status === "PAID", `got ${JSON.stringify(r?.status)}`);
+      } catch (e: any) {
+        check("Account manager (RAISE_PAYMENT_REQUEST) CAN mark an approved payment paid", false, `${e?.name}: ${e?.message}`);
+      }
+      const p4 = await mkPayment(u.id, "REQUESTED");
+      try {
+        await PurchaseHandlers.updateRecord(acctCtx, p4, "payment", { status: "APPROVED" });
+        check("Account manager (no APPROVE) is BLOCKED from approving", false, "was allowed");
+      } catch (e: any) {
+        check("Account manager (no APPROVE) is BLOCKED from approving", e?.forbidden === true, `${e?.name}: ${e?.message}`);
+      }
     }
   } finally {
     if (created.length) await prisma.purchaseRecord.deleteMany({ where: { id: { in: created } } });
-    if (userId) await prisma.user.deleteMany({ where: { id: userId } });
+    if (users.length) {
+      await prisma.userPermissionOverride.deleteMany({ where: { userId: { in: users } } });
+      await prisma.user.deleteMany({ where: { id: { in: users } } });
+    }
     await setEngineOnly(org.id, true); // leave engine-only ON
     console.log("\n  (temp data cleaned up; org left in engine-only mode)");
   }

@@ -6,8 +6,8 @@
  *   - APPROVE_PURCHASE_REQUISITION → set a PR's Production Approval
  *   - APPROVE_PURCHASE_ORDER       → set a PO's Approval status
  *   - POST_GRN_STOCK               → receive goods / post a GRN to inventory
- *   - RAISE_PAYMENT_REQUEST        → raise a payment request against a PO/GRN
- *   - APPROVE_PAYMENT_REQUEST      → approve/hold/reject/mark-paid a payment request
+ *   - RAISE_PAYMENT_REQUEST        → raise a payment request + mark an approved one PAID
+ *   - APPROVE_PAYMENT_REQUEST      → approve/hold/reject a payment request (the decision)
  *   - PROCESS_PURCHASE             → buyer: RFQs, POs, suppliers, edit/delete docs
  *
  * Admins / org-owners bypass these automatically. For everyone else, this script
@@ -55,12 +55,12 @@ const PERMS: Record<string, { name: string; description: string }> = {
   payment: {
     name: "RAISE_PAYMENT_REQUEST",
     description:
-      "Raise a payment request against a PO/GRN. Grant to accounts-payable / purchase roles.",
+      "Raise a payment request against a PO/GRN, and mark an approved request as PAID. Grant to accounts-payable / account-manager roles.",
   },
   "approve-payment": {
     name: "APPROVE_PAYMENT_REQUEST",
     description:
-      "Approve, hold, reject or mark-paid a payment request (set its status). Grant to finance-approver roles.",
+      "Approve, hold or reject a payment request (the approval decision). Marking it PAID is the account manager's RAISE_PAYMENT_REQUEST. Grant to finance-approver / admin roles.",
   },
   process: {
     name: "PROCESS_PURCHASE",
