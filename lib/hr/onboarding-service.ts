@@ -17,6 +17,10 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendPushToUsers } from "@/lib/push/server";
+import {
+  notifyUserAppreciation,
+  onboardingCompleteMessage,
+} from "@/lib/hr/appreciation";
 
 export type OnboardingTaskSeed = {
   title: string;
@@ -249,25 +253,17 @@ async function notifyChecklistCompleted(
   if (!employee) return;
   const empName = employee.employeeName ?? "New hire";
 
-  // Notify the employee themselves if they have a user account.
+  // Notify the employee themselves with a warm, varied welcome (bell + phone).
   if (employee.userId) {
-    await prisma.notification.create({
-      data: {
-        recipientId: employee.userId,
-        organizationId,
-        title: "Onboarding complete",
-        body: "Welcome aboard — your onboarding checklist is done.",
-        moduleName: "Onboarding",
-        recordId: checklistId,
-        link: `/hr/onboarding/${checklistId}`,
-      },
+    const msg = onboardingCompleteMessage({
+      name: empName,
+      seedKey: checklistId,
     });
-    void sendPushToUsers([employee.userId], {
-      title: "Onboarding complete",
-      body: "Welcome aboard — your onboarding checklist is done.",
+    void notifyUserAppreciation(employee.userId, organizationId, msg, {
       url: `/hr/onboarding/${checklistId}`,
+      moduleName: "Onboarding",
       tag: `onboarding:${checklistId}`,
-    }).catch(() => {});
+    });
   }
 
   // Notify org admins.
