@@ -46,6 +46,7 @@ import {
   LogOut,
   Building2,
   Wallet,
+  Network,
   ChevronRight,
   ChevronLeft,
 } from "lucide-react"
@@ -58,6 +59,7 @@ import NotificationsTab from "@/components/profile/NotificationsTab"
 import PreferencesTab from "@/components/profile/PreferencesTab"
 import SecurityTab from "@/components/profile/SecurityTab"
 import OrganizationTab from "@/components/profile/OrganizationTab"
+import HierarchyTab from "@/components/profile/HierarchyTab"
 import type { ProfileTabId, ProfileUser } from "@/components/profile/types"
 import { displayName, initialsOf } from "@/components/profile/profile-utils"
 import { DailyBanner } from "@/components/profile/DailyBanner"
@@ -77,6 +79,7 @@ const TABS: Array<TabDef> = [
   { id: "personal", label: "Personal info", icon: <UserIcon className="h-4 w-4" /> },
   { id: "employment", label: "Employment", icon: <Briefcase className="h-4 w-4" /> },
   { id: "salary", label: "Salary", icon: <Wallet className="h-4 w-4" /> },
+  { id: "hierarchy", label: "Reporting structure", icon: <Network className="h-4 w-4" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="h-4 w-4" /> },
   { id: "preferences", label: "Preferences", icon: <Settings className="h-4 w-4" /> },
   { id: "security", label: "Security", icon: <Shield className="h-4 w-4" /> },
@@ -132,6 +135,7 @@ const MOBILE_GROUPS: MobileGroup[] = [
     items: [
       { id: "employment" },
       { id: "salary" },
+      { id: "hierarchy" },
     ],
   },
   {
@@ -252,6 +256,8 @@ export default function ProfilePage() {
         return <EmploymentTab user={user} />
       case "salary":
         return <SalaryTab user={user} />
+      case "hierarchy":
+        return <HierarchyTab />
       case "notifications":
         return <NotificationsTab />
       case "preferences":

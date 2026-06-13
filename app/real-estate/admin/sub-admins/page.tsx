@@ -11,7 +11,7 @@
  *   shows the role names already on the user.
  *
  *   Inviting a new sub-admin → redirects to the central user-management
- *   surface (/settings/profiles) so we don't duplicate the create form.
+ *   surface (/settings/users) so we don't duplicate the create form.
  *   Editing role membership → redirects to the existing role-permission UI.
  *
  * Tabs match the screenshot: Active / Inactive / Trashed (based on
@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  ShieldCheck, Plus, Search, MoreHorizontal, ExternalLink,
+  ShieldCheck, Plus, Search, MoreHorizontal,
   Users as UsersIcon, ChevronLeft, ChevronRight, CircleCheck, CircleX, Trash2,
 } from "lucide-react";
 import { fullName, initials, formatDate } from "@/components/real-estate/constants";
@@ -120,7 +120,7 @@ export default function SubAdminsPage() {
             </Link>
           </Button>
           <Button asChild size="sm">
-            <Link href="/settings/profiles">
+            <Link href="/settings/users">
               <Plus className="h-4 w-4 mr-1.5" /> Add Sub-Admin
             </Link>
           </Button>
@@ -243,11 +243,6 @@ export default function SubAdminsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
-                              <Link href={`/settings/profiles/${u.id}`}>
-                                <ExternalLink className="h-3.5 w-3.5 mr-2" /> Open profile
-                              </Link>
-                            </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                               <Link href={`/settings/permission/users/${u.id}`}>
                                 <ShieldCheck className="h-3.5 w-3.5 mr-2" /> Manage permissions

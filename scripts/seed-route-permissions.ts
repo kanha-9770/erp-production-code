@@ -58,7 +58,6 @@ const STATIC_ROUTES: { pattern: string; description: string }[] = [
     pattern: "/settings/permission/route",
     description: "Route-based permissions",
   },
-  { pattern: "/settings/profiles", description: "Profile settings" },
   { pattern: "/settings/users", description: "Users list" },
   {
     pattern: "/settings/users/user-management",

@@ -889,13 +889,6 @@ export const STATIC_PAGES: StaticPage[] = [
     adminOnly: true,
     icon: 'boxes',
   },
-  {
-    path: '/settings/profiles',
-    label: 'User Profiles',
-    group: 'Settings',
-    adminOnly: true,
-    icon: 'users',
-  },
 ];
 
 /**

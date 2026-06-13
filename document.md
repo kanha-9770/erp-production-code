@@ -131,7 +131,6 @@ All rules are defined in `lib/route-permissions.ts`:
 | `/data-migration/**` | Data import/export |
 | `/settings/roles` | Role management |
 | `/settings/users/**` | User management |
-| `/settings/profiles` | Profile management |
 
 ### Permission-Gated Routes (`requiredPermissions`)
 
@@ -168,7 +167,7 @@ All routes not listed above are accessible to any authenticated user, including:
 - Does NOT check `requiredPermissions` rules (too expensive without DB)
 
 **What it catches:**
-- Non-admin users trying to access `/admin/**`, `/builder/**`, `/data-migration/**`, `/settings/roles`, `/settings/users/**`, `/settings/profiles`
+- Non-admin users trying to access `/admin/**`, `/builder/**`, `/data-migration/**`, `/settings/roles`, `/settings/users/**`
 
 **What it defers to layouts:**
 - Permission-specific checks (e.g., `VIEW_AUDIT_LOG` for `/settings/audit-log`)
@@ -630,7 +629,7 @@ The route permission system uses glob-style patterns:
 | Pattern | Matches | Does NOT Match |
 |---------|---------|----------------|
 | `/admin/**` | `/admin/dashboard`, `/admin/analytics`, `/admin/a/b/c` | `/admin` (no trailing segment) |
-| `/settings/users/**` | `/settings/users`, `/settings/users/user-management` | `/settings/profiles` |
+| `/settings/users/**` | `/settings/users`, `/settings/users/user-management` | `/settings/company` |
 | `/settings/roles` | `/settings/roles` | `/settings/roles/edit`, `/settings/roles-page` |
 | `/payroll` | `/payroll` | `/payroll/details`, `/payroll-settings` |
 

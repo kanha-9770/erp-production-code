@@ -748,3 +748,231 @@ export async function getVisibleUserIdsForHierarchy(
     new Set<string>([userId, ...assignments.map((a) => a.userId)]),
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scoped role hierarchy — the per-user "who do I report to / who reports to me"
+// view rendered on the profile page (/profile#hierarchy). Unlike the admin
+// Org Architecture screen (/settings/company) which shows the WHOLE role tree,
+// this returns ONLY the caller's own slice of it:
+//   • reportsTo  — the chain of roles ABOVE the caller (top-most → direct
+//                  manager), so a Sales Exec sees Sales Head → … → Admin.
+//   • you        — the caller's own role node, with the descendant subtree
+//                  (everyone who rolls up under them) nested in `children`.
+//   • totalReports — distinct head-count of users in roles strictly below the
+//                  caller (their team size), excluding the caller themselves.
+// Sibling branches the caller isn't part of are never included, so no user
+// can see teams outside their own reporting line.
+//
+// Scoping & exposure (security-relevant — read before editing):
+//   • The ONLY roles included are the caller's strict ancestors (a linear
+//     parent_id walk to the root), their own role, and their strict
+//     descendants. `parent_id` is a single FK, so the ancestor chain is
+//     linear — an unrelated branch's role can never surface as an ancestor.
+//     Descendants are isolated by the tree itself: a Sales Head's subtree
+//     has no IT roles, so IT users never appear in a Sales view.
+//   • Each included role exposes its holders' name / email / avatar. For
+//     ancestor roles these are the caller's actual chain of command (the
+//     "whom do I report to" the feature is for); for descendant roles they
+//     are the caller's own team.
+//   • There is intentionally NO shared-unit guard (mirroring
+//     getVisibleUserIdsForHierarchy, NOT getInheritedUserIds). A manager and
+//     their report frequently sit in different org units, so filtering
+//     holders by unit overlap would HIDE the caller's real manager — a worse
+//     failure than showing a peer-manager who co-holds a shared trunk role.
+//     The role tree, not unit membership, is the isolation boundary here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface HierarchyUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+  /** True for the logged-in caller, so the UI can highlight "you". */
+  isYou: boolean;
+}
+
+export interface HierarchyNode {
+  roleId: string;
+  roleName: string;
+  level: number;
+  isAdmin: boolean;
+  /** True when this role is one the caller holds. */
+  isYou: boolean;
+  /** Distinct count of users holding THIS role. */
+  userCount: number;
+  /** People holding this role (deduped across units). */
+  users: HierarchyUser[];
+  /** Downward subtree — populated for the caller's node + its descendants;
+   *  always empty ([]) for ancestor nodes in `reportsTo`. */
+  children: HierarchyNode[];
+}
+
+export interface ScopedHierarchyChain {
+  /** Ancestor roles, ordered top-most → the caller's direct manager. */
+  reportsTo: HierarchyNode[];
+  /** The caller's own role node, with descendants nested under `children`. */
+  you: HierarchyNode;
+  /** Distinct users in roles strictly below the caller (excludes the caller). */
+  totalReports: number;
+}
+
+export interface ScopedRoleHierarchy {
+  /** False when the caller has no role assigned yet. */
+  hasRole: boolean;
+  isAdmin: boolean;
+  /** One chain per role the caller holds (usually exactly one). */
+  chains: ScopedHierarchyChain[];
+}
+
+/**
+ * Build the caller's scoped slice of the org role hierarchy (see block comment
+ * above). Fetches every active role once and assembles ancestor chains +
+ * descendant subtrees in memory — org role counts are small (dozens), so a
+ * single query beats recursive round-trips. Depth-capped + cycle-guarded so a
+ * malformed parent link can never spin forever.
+ */
+export async function getScopedRoleHierarchyForUser(
+  userId: string,
+  organizationId: string,
+): Promise<ScopedRoleHierarchy> {
+  const ctx = await getCallerRoleContext(userId, organizationId);
+  if (ctx.roleIds.length === 0) {
+    return { hasRole: false, isAdmin: ctx.isAdmin, chains: [] };
+  }
+
+  const roles = await prisma.role.findMany({
+    where: { organizationId, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      level: true,
+      isAdmin: true,
+      userAssignments: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              avatar: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ level: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
+  });
+
+  type RawRole = (typeof roles)[number];
+  const byId = new Map<string, RawRole>();
+  const childIds = new Map<string, string[]>();
+  for (const r of roles) byId.set(r.id, r);
+  for (const r of roles) {
+    if (r.parentId && byId.has(r.parentId)) {
+      const list = childIds.get(r.parentId);
+      if (list) list.push(r.id);
+      else childIds.set(r.parentId, [r.id]);
+    }
+  }
+
+  const callerRoleIds = new Set(ctx.roleIds);
+
+  const distinctUsers = (r: RawRole): HierarchyUser[] => {
+    const seen = new Map<string, HierarchyUser>();
+    for (const a of r.userAssignments) {
+      const u = a.user;
+      if (!u || seen.has(u.id)) continue;
+      const name =
+        `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email;
+      seen.set(u.id, {
+        id: u.id,
+        name,
+        email: u.email,
+        avatar: u.avatar,
+        isYou: u.id === userId,
+      });
+    }
+    return Array.from(seen.values());
+  };
+
+  // Build a node; when `withChildren`, recurse into the subtree. `visited`
+  // guards against cycles, `depth` caps runaway trees (matches the value used
+  // by getDescendantRoleIds).
+  const buildNode = (
+    roleId: string,
+    withChildren: boolean,
+    visited: Set<string>,
+    depth: number,
+  ): HierarchyNode => {
+    const r = byId.get(roleId)!;
+    const users = distinctUsers(r);
+    const node: HierarchyNode = {
+      roleId: r.id,
+      roleName: r.name,
+      level: r.level,
+      isAdmin: r.isAdmin,
+      isYou: callerRoleIds.has(r.id),
+      userCount: users.length,
+      users,
+      children: [],
+    };
+    if (withChildren && depth < 20) {
+      for (const kid of childIds.get(roleId) ?? []) {
+        if (visited.has(kid)) continue;
+        visited.add(kid);
+        node.children.push(buildNode(kid, true, visited, depth + 1));
+      }
+    }
+    return node;
+  };
+
+  // Distinct head-count of users in roles strictly below `roleId`, excluding
+  // the caller (so you never count yourself as your own report).
+  const countReports = (roleId: string): number => {
+    const seen = new Set<string>();
+    const visited = new Set<string>([roleId]);
+    const walk = (rid: string, depth: number) => {
+      if (depth >= 20) return;
+      for (const kid of childIds.get(rid) ?? []) {
+        if (visited.has(kid)) continue;
+        visited.add(kid);
+        const r = byId.get(kid);
+        if (r) {
+          for (const a of r.userAssignments) {
+            if (a.user && a.user.id !== userId) seen.add(a.user.id);
+          }
+        }
+        walk(kid, depth + 1);
+      }
+    };
+    walk(roleId, 0);
+    return seen.size;
+  };
+
+  const chains: ScopedHierarchyChain[] = ctx.roleIds
+    .filter((rid) => byId.has(rid))
+    .map((rid) => {
+      // Walk parent links upward → ancestors (top-most first after reverse).
+      const reportsTo: HierarchyNode[] = [];
+      const ancestorVisited = new Set<string>([rid]);
+      let cursor = byId.get(rid)!.parentId;
+      let guard = 0;
+      while (cursor && byId.has(cursor) && !ancestorVisited.has(cursor) && guard < 20) {
+        ancestorVisited.add(cursor);
+        reportsTo.push(buildNode(cursor, false, new Set(), 0));
+        cursor = byId.get(cursor)!.parentId;
+        guard++;
+      }
+      reportsTo.reverse();
+
+      return {
+        reportsTo,
+        you: buildNode(rid, true, new Set<string>([rid]), 0),
+        totalReports: countReports(rid),
+      };
+    });
+
+  return { hasRole: chains.length > 0, isAdmin: ctx.isAdmin, chains };
+}
