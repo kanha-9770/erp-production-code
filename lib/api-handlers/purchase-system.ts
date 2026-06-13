@@ -11,12 +11,13 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { SEED_MASTERS, SUBMODULE_ORDER, getSchema, GATE_ENTRY_SCHEMA } from "@/lib/purchase-system/schema";
+import { SEED_MASTERS, SUBMODULE_ORDER, getSchema, GATE_ENTRY_SCHEMA, isAdvancePaymentTerm } from "@/lib/purchase-system/schema";
 import { seedRecords } from "@/lib/purchase-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
 import {
   POST_GRN_STOCK,
   getPurchasePermissions,
+  hasAnyPurchaseCapability,
   guardedPermissionForCreate,
   guardedPermissionForPatch,
   requirePurchasePermission,
@@ -35,6 +36,8 @@ import {
   findMatchingProcess,
   submitForApproval,
   cancelOpenRequestsForRecords,
+  buildRoleParentMap,
+  isDescendantRole,
   APPROVAL_TX_OPTS,
 } from "@/lib/approvals/engine";
 import { ApprovalLockedError } from "@/lib/approvals/errors";
@@ -271,6 +274,65 @@ async function assertGrnPosApproved(organizationId: string, refs: string[]): Pro
   if (blocked.length > 0) throw new UnapprovedPoReceiveError(blocked);
 }
 
+/** Thrown when receiving against an advance-terms PO whose advance payment
+ *  isn't approved yet → 403. */
+class UnpaidAdvanceReceiveError extends Error {
+  readonly forbidden = true;
+  constructor(refs: string[]) {
+    const list = refs.join(", ");
+    super(
+      refs.length > 1
+        ? `An approved advance payment is required before goods can be received against these purchase orders: ${list}.`
+        : `Purchase order ${list} needs an approved advance payment before goods can be received against it.`,
+    );
+    this.name = "UnpaidAdvanceReceiveError";
+  }
+}
+
+/**
+ * Block receiving against an ADVANCE-terms PO that has no approved payment yet.
+ * For every supplied poRef that matches a KNOWN PO whose paymentTerms are
+ * advance-based, at least one payment request referencing it must be APPROVED
+ * (or already PAID). Credit-term POs — and refs matching no known PO — are left
+ * alone (payment follows receipt there). Mirrors assertGrnPosApproved; applied to
+ * both the gate entry (receiving start) and the GRN.
+ */
+async function assertAdvancePaid(organizationId: string, refs: string[]): Promise<void> {
+  const want = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  if (want.length === 0) return;
+
+  // Which of the referenced POs are advance-terms? Only those gate receiving.
+  const pos = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "po" },
+    select: { data: true },
+  });
+  const advanceRefs = new Set<string>();
+  for (const po of pos) {
+    const d = (po.data as Record<string, unknown>) ?? {};
+    const docNo = String(d.docNo ?? "").trim();
+    if (docNo && want.includes(docNo) && isAdvancePaymentTerm(String(d.paymentTerms ?? ""))) {
+      advanceRefs.add(docNo);
+    }
+  }
+  if (advanceRefs.size === 0) return;
+
+  // An advance is satisfied by any payment for that PO at APPROVED or PAID.
+  const payments = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "payment" },
+    select: { data: true },
+  });
+  const paidRefs = new Set<string>();
+  for (const p of payments) {
+    const d = (p.data as Record<string, unknown>) ?? {};
+    const ref = String(d.poRef ?? "").trim();
+    const status = String(d.status ?? "").toUpperCase();
+    if (ref && (status === "APPROVED" || status === "PAID")) paidRefs.add(ref);
+  }
+
+  const blocked = [...advanceRefs].filter((r) => !paidRefs.has(r));
+  if (blocked.length > 0) throw new UnpaidAdvanceReceiveError(blocked);
+}
+
 /** Thrown when a document is converted from a source whose generic approval
  *  (`data._approval`) hasn't settled as APPROVED. 409 = unmet precondition. */
 class UnapprovedSourceConvertError extends Error {
@@ -458,6 +520,64 @@ async function consumeGateEntry(
   });
 }
 
+/**
+ * Row-level Purchase-Requisition visibility (org role hierarchy).
+ *
+ * A non-admin may see a PR only when they RAISED it, or when its creator holds a
+ * role strictly BELOW one of the viewer's roles in the org role tree (i.e. the
+ * creator is the viewer's subordinate). Admins see every PR and never reach here.
+ * Returns the set of visible PR record ids. Mirrors the approval engine's
+ * hierarchy model (buildRoleParentMap / isDescendantRole). Three reads, batched
+ * and parallel, so it adds one round-trip regardless of PR count.
+ */
+async function visiblePrIds(
+  organizationId: string,
+  viewerId: string,
+  prRows: Array<{ id: string; createdById: string | null }>,
+): Promise<Set<string>> {
+  const visible = new Set<string>();
+  // Own PRs are always visible; only the rest need a hierarchy check.
+  const others: Array<{ id: string; createdById: string }> = [];
+  for (const r of prRows) {
+    if (r.createdById && r.createdById === viewerId) visible.add(r.id);
+    else if (r.createdById) others.push({ id: r.id, createdById: r.createdById });
+    // A PR with no creator (legacy/seed) stays hidden from non-admins.
+  }
+  if (others.length === 0) return visible;
+
+  const creatorIds = [...new Set(others.map((r) => r.createdById))];
+  const [viewerAssignments, creatorAssignments, parentById] = await Promise.all([
+    prisma.userUnitAssignment.findMany({
+      where: { userId: viewerId, role: { isActive: true }, unit: { isActive: true } },
+      select: { roleId: true },
+    }),
+    prisma.userUnitAssignment.findMany({
+      where: { userId: { in: creatorIds }, role: { isActive: true }, unit: { isActive: true } },
+      select: { userId: true, roleId: true },
+    }),
+    buildRoleParentMap(prisma, organizationId),
+  ]);
+
+  const viewerRoleIds = [...new Set(viewerAssignments.map((a) => a.roleId))];
+  if (viewerRoleIds.length === 0) return visible; // no roles → only own PRs
+
+  const rolesByCreator = new Map<string, string[]>();
+  for (const a of creatorAssignments) {
+    const arr = rolesByCreator.get(a.userId);
+    if (arr) arr.push(a.roleId);
+    else rolesByCreator.set(a.userId, [a.roleId]);
+  }
+
+  for (const r of others) {
+    const creatorRoles = rolesByCreator.get(r.createdById) ?? [];
+    const isSubordinate = creatorRoles.some((cr) =>
+      viewerRoleIds.some((vr) => isDescendantRole(cr, vr, parentById)),
+    );
+    if (isSubordinate) visible.add(r.id);
+  }
+  return visible;
+}
+
 export const PurchaseHandlers = {
   async load(ctx: PurCtx): Promise<PurchaseSnapshot> {
     await seedIfFirstLoad(ctx);
@@ -486,19 +606,39 @@ export const PurchaseHandlers = {
       where: { organizationId: ctx.organizationId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
+
+    const [currentUser, permissions, sectionAccess, isAdmin] = await Promise.all([
+      resolveUserIdentity(ctx.userId),
+      getPurchasePermissions(ctx.userId),
+      getSectionAccess(ctx.userId, ctx.organizationId, "purchase"),
+      isOrgAdmin(ctx.userId),
+    ]);
+
+    // Row-level PR scoping: a PURE REQUESTER sees only the requisitions they
+    // raised plus those raised by their subordinates (org role tree). Anyone in
+    // the procurement pipeline bypasses this — admins, and anyone holding a
+    // purchase capability (buyer / approver / AP / gate / QC / STORE INCHARGE),
+    // since every PR ultimately flows inward to the store. All other submodules
+    // stay fully visible.
+    const seesAllPr = isAdmin || hasAnyPurchaseCapability(permissions);
+    const prRows = rows.filter((r) => r.submodule === "pr");
+    let visiblePr: Set<string> | null = null;
+    if (!seesAllPr && prRows.length > 0) {
+      visiblePr = await visiblePrIds(
+        ctx.organizationId,
+        ctx.userId,
+        prRows.map((r) => ({ id: r.id, createdById: r.createdById })),
+      );
+    }
+
     const records = {
       supplier: [], pr: [], sourcing: [], po: [], gateEntry: [], grn: [], payment: [],
     } as Record<PurchaseSubmoduleKey, PurchaseRecordType[]>;
     for (const r of rows) {
+      if (r.submodule === "pr" && visiblePr && !visiblePr.has(r.id)) continue;
       (records[r.submodule as PurchaseSubmoduleKey] ??= []).push(toRecord(r));
     }
     for (const k of SUBMODULE_ORDER) records[k] ??= [];
-
-    const [currentUser, permissions, sectionAccess] = await Promise.all([
-      resolveUserIdentity(ctx.userId),
-      getPurchasePermissions(ctx.userId),
-      getSectionAccess(ctx.userId, ctx.organizationId, "purchase"),
-    ]);
     // Every privileged purchase FIELD is now reserved to its named permission even
     // under engine-only — GRN stock-posting (postStock), the PR approval
     // (approveRequisition — Production Approval / Item Location Kept), the PO
@@ -556,10 +696,14 @@ export const PurchaseHandlers = {
       existing: null,
       patch: clean,
     });
-    // Goods may only be received against an APPROVED purchase order — checked on
-    // the gate entry (where items are first logged) and the GRN (copied refs).
+    // Goods may only be received against an APPROVED purchase order — and, for
+    // advance-payment-term POs, only once an advance payment has been approved.
+    // Both are checked on the gate entry (where items are first logged) and the
+    // GRN (copied refs).
     if (submodule === "gateEntry" || submodule === "grn") {
-      await assertGrnPosApproved(ctx.organizationId, grnPoRefs(clean));
+      const poRefs = grnPoRefs(clean);
+      await assertGrnPosApproved(ctx.organizationId, poRefs);
+      await assertAdvancePaid(ctx.organizationId, poRefs);
     }
     // A document may only be converted from a source whose own approval has
     // completed: raising a PO from a still-pending PR/RFQ (or a payment from a

@@ -340,6 +340,29 @@ export async function getPurchasePermissions(
   };
 }
 
+/**
+ * Does the user hold ANY purchase processing / approval / posting capability —
+ * i.e. are they part of the procurement pipeline (buyer, PR/PO approver, AP, or
+ * the gate / QC / store incharge) rather than a pure requester? Mirrors the
+ * `canEdit` set in record-preview. Used to BYPASS row-level PR visibility
+ * scoping: everyone in the pipeline sees every requisition (each one ultimately
+ * flows inward to the store), while a pure requester sees only their own +
+ * their subordinates' PRs.
+ */
+export function hasAnyPurchaseCapability(p: PurchasePermissions): boolean {
+  return (
+    p.process ||
+    p.approveRequisition ||
+    p.approvePo ||
+    p.postStock ||
+    p.raisePayment ||
+    p.approvePayment ||
+    p.gateEntry ||
+    p.qcInspection ||
+    p.storeInspection
+  );
+}
+
 /** A guarded field set to a "decided"/privileged value (not the benign default). */
 function isPrivilegedValue(field: string, v: unknown): boolean {
   const s = String(v ?? "").trim().toUpperCase();

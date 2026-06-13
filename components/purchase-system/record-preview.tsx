@@ -47,6 +47,7 @@ export function RecordPreview({
   onPromote,
   onPostStock,
   onSetStatus,
+  advancePaymentDue,
   permissions,
 }: {
   schema: SubmoduleSchema;
@@ -59,6 +60,9 @@ export function RecordPreview({
   onPostStock?: () => void;
   /** Advance this document's workflow status (payment approval buttons). */
   onSetStatus?: (status: string) => void;
+  /** PO only: this is an advance-terms PO with no approved payment yet, so goods
+   *  can't be received against it until an advance payment is approved. */
+  advancePaymentDue?: boolean;
   /** The logged-in user's purchase capabilities — drives which action buttons
    *  show. A pure requester (no caps) sees only the read-only document. */
   permissions: PurchasePermissions;
@@ -87,10 +91,15 @@ export function RecordPreview({
           ? permissions.raisePayment
           : permissions.process;
 
-  // A PO must be APPROVED before goods can be received against it. An unapproved
-  // PO hides its "Receive (Gate Entry)" step; the server enforces this too.
+  // A PO must be APPROVED before goods can be received against it — and, for an
+  // advance-payment-term PO, its advance payment must also be approved. Either
+  // gap hides the "Receive (Gate Entry)" step; the server enforces both too.
   const poApproved = String(record.approvalStatus ?? "").toUpperCase() === "APPROVED";
-  const receiveBlocked = schema.key === "po" && !poApproved;
+  const advanceDue = schema.key === "po" && !!advancePaymentDue;
+  const receiveBlocked = schema.key === "po" && (!poApproved || advanceDue);
+  const receiveBlockMsg = !poApproved
+    ? "Approve this PO (Approval = Approved) before it can be received"
+    : "An advance payment for this PO must be approved before it can be received";
   // "Create GRN" only applies once the gate entry has CLEARED its inspections.
   const geCleared = schema.key === "gateEntry" && gateEntryIsCleared(record.status as string);
   // This document can't be converted while its OWN approval is unsettled — a
@@ -264,7 +273,7 @@ export function RecordPreview({
             ) : null}
             {receiveBlocked && permissions.gateEntry ? (
               <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Lock className="h-3.5 w-3.5" /> Approve this PO (Approval = Approved) before it can be received
+                <Lock className="h-3.5 w-3.5" /> {receiveBlockMsg}
               </span>
             ) : null}
             {onPostStock ? (

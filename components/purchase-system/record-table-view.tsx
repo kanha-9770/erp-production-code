@@ -48,7 +48,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePurchase } from "@/lib/purchase-system/store";
-import { getSchema } from "@/lib/purchase-system/schema";
+import { getSchema, isAdvancePaymentTerm } from "@/lib/purchase-system/schema";
 import type { PromotionDef } from "@/lib/purchase-system/promote";
 import { formatMoney, formatNumber, formatDate, resolveStatus } from "@/lib/purchase-system/format";
 import { grnItemRows } from "@/lib/purchase-system/receipt";
@@ -244,6 +244,21 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
   }, [schema]);
 
   const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
+
+  // For an advance-payment-term PO, goods can't be received until an advance
+  // payment is approved. Mirror of assertAdvancePaid (server) so the PO preview
+  // can lock "Receive (Gate Entry)" with a reason instead of silently hiding it.
+  const selectedAdvanceDue = useMemo(() => {
+    if (!selected || submodule !== "po") return false;
+    if (!isAdvancePaymentTerm(String(selected.paymentTerms ?? ""))) return false;
+    const poNo = String(selected.docNo ?? "").trim();
+    if (!poNo) return false;
+    return !records.payment.some(
+      (p) =>
+        String(p.poRef ?? "").trim() === poNo &&
+        ["APPROVED", "PAID"].includes(String(p.status ?? "").toUpperCase()),
+    );
+  }, [selected, submodule, records.payment]);
 
   const activeFilters = [
     statusFilter && statusField
@@ -459,6 +474,7 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
                   ? (status) => void updateRecord(submodule, selected.id, { status })
                   : undefined
               }
+              advancePaymentDue={selectedAdvanceDue}
               permissions={permissions}
             />
           ) : null
