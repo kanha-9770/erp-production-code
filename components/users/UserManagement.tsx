@@ -1,10 +1,12 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useGetUserQuery } from "@/lib/api/auth";
 import { useGetUsersQuery, useDeleteUserMutation, useCreateUserMutation, useUpdateUserMutation } from "@/lib/api/users";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { useGetRolesQuery } from "@/lib/api/permissions";
 import { useGetOrganizationUnitsQuery } from "@/lib/api/organization";
+import { DepartmentCombobox } from "@/components/shared/department-combobox";
 import { useToast } from "@/hooks/use-toast";
 import { useRouteAccess } from "@/hooks/use-route-access";
 import PageBackLink from "@/components/shared/page-back-link";
@@ -160,6 +162,24 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
   const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const { data: orgUnitsData } = useGetOrganizationUnitsQuery();
 
+  // Department options come from the same source as the Employee Master form:
+  // the distinct departments already in use across employees. This keeps the
+  // user form's department picker in lockstep with Employee Master (no separate
+  // Department table). The employee list also lets us auto-fill a user's
+  // department from their linked employee record on edit (see handleEdit).
+  const { data: empList } = useGetEmployeeListQuery();
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    empList?.employees?.forEach((e) => {
+      const d = (e.department ?? "").trim();
+      if (d) set.add(d);
+    });
+    // Keep the currently-selected value present so an edit never renders blank
+    // when the stored department isn't (yet) used by any other employee.
+    if (formData.department?.trim()) set.add(formData.department.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [empList?.employees, formData.department]);
+
   const isSaving = isCreating || isUpdating;
 
   // RTK Query hooks for initial data
@@ -295,11 +315,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
   };
 
   const handleEdit = (user: User) => {
+    // Auto-fill the department: prefer the value already on the user, but when
+    // it's empty fall back to the department on their linked Employee Master
+    // record (matched by linked userId, then by email). If neither has one the
+    // field stays empty and the admin picks from the dropdown.
+    let department = user.department || '';
+    if (!department && empList?.employees?.length) {
+      const emailLc = user.email?.toLowerCase();
+      const linkedEmp = empList.employees.find(
+        (e) =>
+          (e.userId && e.userId === user.id) ||
+          (!!emailLc && e.emailAddress1?.toLowerCase() === emailLc)
+      );
+      if (linkedEmp?.department) department = linkedEmp.department;
+    }
     setFormData({
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
-      department: user.department,
+      department,
       unitId: user.unitAssignments?.[0]?.unit?.id || '',
       roleId: user.unitAssignments?.[0]?.role?.id || '',
     });
@@ -736,14 +770,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
 
                 <div className="space-y-1.5">
                   <Label htmlFor="department" className="text-xs">Department</Label>
-                  <Input
-                    id="department"
-                    name="department"
-                    placeholder="e.g. Engineering"
+                  <DepartmentCombobox
                     value={formData.department || ''}
-                    onChange={handleInputChange}
-                    disabled={isSaving}
+                    options={departmentOptions}
+                    onChange={(v) => setFormData((prev) => ({ ...prev, department: v }))}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {departmentOptions.length > 0
+                      ? "Pick from departments used in Employee Master, or add a new one."
+                      : "No departments yet — type one to create it."}
+                  </p>
                 </div>
               </div>
 
