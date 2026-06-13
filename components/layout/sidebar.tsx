@@ -174,6 +174,13 @@ const ACCENT_HOVER = "#6b5da8";
 // section (and its "New module" button) back.
 const SHOW_DYNAMIC_MODULES = false;
 
+// Whitelist safety floor: paths that stay visible to every signed-in user
+// regardless of route grants, so a misconfigured (or not-yet-seeded) role can
+// never be fully stranded — a user must always be able to reach their own
+// profile. Keep this list MINIMAL; everything else is hidden until explicitly
+// granted in Settings → Permission → Route.
+const ALWAYS_VISIBLE_PATHS = new Set<string>(["/profile"]);
+
 // ─── Static-page groups ───────────────────────────────────────────────────
 // Static pages (Leave / Attendance / Payroll / Holidays / etc.) appear in the
 // sidebar BY DEFAULT, organised into one top-level collapsible folder per
@@ -1011,20 +1018,27 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     const sortedModules = sortModules(roots as ModuleNode[]);
     const permittedModules = filterByPermission(sortedModules);
 
-    // Static-page group folders render BY DEFAULT (no placement step). Pages
-    // are gated by the ROUTE-access system (the same one the middleware and
-    // page guards use), NOT the module-permission engine:
-    //   - normal pages are open-by-default — shown unless explicitly DENIED
-    //     (`canAccess`), so a fresh org with no per-page grants still sees its
-    //     workspace instead of an empty sidebar;
-    //   - `adminOnly` pages are whitelist — hidden unless the user is an admin
-    //     or has an explicit grant (`isPermitted`).
-    // Admins pass both. This matches the documented contract in
-    // lib/static-pages.ts; gating these with checkPermission("VIEW", …) made
-    // every page whitelist-only and emptied the sidebar for non-admins.
+    // Static-page group folders are gated by the ROUTE-access system (the same
+    // one the middleware and page guards use) in WHITELIST mode:
+    //   - a page is shown ONLY when the user's role (or the user directly) has
+    //     an explicit grant for its path (`isPermitted`) — no grant = hidden;
+    //   - admins always pass (isPermitted short-circuits to true for admins);
+    //   - ALWAYS_VISIBLE_PATHS is a minimal safety floor (e.g. /profile) so a
+    //     user with zero grants is never fully stranded out of their account;
+    //   - `enabledGroups` (the org's ERP-module selection) still hides whole
+    //     groups on top of this, so both levers compose.
+    // Grants are managed per role/user in Settings → Permission → Route and
+    // persist as RouteRoleAccess / RouteUserAccess rows (see route-meta.ts).
+    //
+    // IMPORTANT — because this is whitelist (closed-by-default), every role
+    // must be SEEDED with the pages it should see or its sidebar is blank. Run
+    // `npm run seed:route-whitelist` once (idempotent) before/at deploy; it
+    // grants each non-admin role the pages it saw under the old open-by-default
+    // model, then admins prune per role from the Route Permissions page. A
+    // brand-new static page is hidden from everyone until granted — by design.
     const staticFolders = buildStaticGroupFolders({
       canViewPage: (page: StaticPage) =>
-        page.adminOnly ? isPermitted(page.path) : canAccess(page.path),
+        ALWAYS_VISIBLE_PATHS.has(page.path) || isPermitted(page.path),
       enabledGroups,
     }) as unknown as ModuleNode[];
 

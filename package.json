@@ -12,6 +12,7 @@
     "create-default-org": "ts-node --esm --transpile-only scripts/create-default-organization.ts",
     "create:second-org": "npx tsx scripts/create-second-organization.ts",
     "seed:routes": "npx tsx scripts/seed-route-permissions.ts",
+    "seed:route-whitelist": "npx tsx scripts/seed-route-whitelist.ts",
     "seed:approvals": "npx tsx scripts/seed-approval-processes.ts",
     "seed:payroll": "npx tsx scripts/seed-payroll-data.ts",
     "seed:re-team": "npx tsx scripts/seed-real-estate-team.ts",
