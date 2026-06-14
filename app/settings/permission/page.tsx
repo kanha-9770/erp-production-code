@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { ShieldCheck, Route, Globe, ListChecks } from "lucide-react"
+import { ShieldCheck, Route, Globe, ListChecks, Wand2 } from "lucide-react"
 import { useRouteAccess } from "@/hooks/use-route-access"
 import PageBackLink from "@/components/shared/page-back-link"
 
@@ -16,6 +16,7 @@ export default function PermissionPage() {
     "/settings/permission/static-page-permission",
   )
   const canAccessApprovals = isPermitted("/settings/permission/approvals")
+  const canAccessTemplates = isPermitted("/settings/permission/templates")
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
@@ -31,6 +32,30 @@ export default function PermissionPage() {
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-6">
+            {canAccessTemplates && (
+              <Card className="hover:shadow-lg transition-shadow ring-1 ring-blue-200 dark:ring-blue-900">
+                <CardHeader>
+                  <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center mb-4">
+                    <Wand2 className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <CardTitle className="flex items-center gap-2">
+                    Quick Setup
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 bg-blue-100 dark:bg-blue-900/40 rounded px-1.5 py-0.5">
+                      Easiest
+                    </span>
+                  </CardTitle>
+                  <CardDescription>
+                    Set up a role in one click with a ready-made template (Purchase Manager, Accountant…) or copy another role&apos;s access.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link href="/settings/permission/templates">
+                    <Button className="w-full">Use a Template</Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
             {canAccessRoles && (
               <Card className="hover:shadow-lg transition-shadow">
                 <CardHeader>
@@ -113,7 +138,7 @@ export default function PermissionPage() {
               </Card>
             )}
 
-            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPagePerms && !canAccessApprovals && (
+            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPagePerms && !canAccessApprovals && !canAccessTemplates && (
               <div className="col-span-full text-center py-12">
                 <p className="text-muted-foreground">
                   You don't have permission to access any permission management features.

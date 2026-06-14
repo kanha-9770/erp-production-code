@@ -231,6 +231,42 @@ export const permissionsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["Permissions"],
     }),
+
+    // Fetch a role's current grants (labelled) so the copy flow can preview +
+    // deselect before applying.
+    getRoleGrants: builder.query<
+      {
+        success: boolean
+        routes: Array<{ value: string; label: string }>
+        actions: Array<{ value: string; label: string }>
+      },
+      string // roleId
+    >({
+      query: (roleId) => `/role-templates/role-grants?roleId=${roleId}`,
+      keepUnusedDataFor: 30,
+    }),
+
+    // Apply an explicit, user-edited bundle of grants to a target role.
+    // Merges across the route + action engines in one call.
+    applyRoleGrants: builder.mutation<
+      {
+        success: boolean
+        routesGranted: number
+        actionsGranted: number
+        routesRequested: number
+        actionsRequested: number
+        error?: string
+      },
+      { targetRoleId: string; routes: string[]; actions: string[] }
+    >({
+      query: (body) => ({
+        url: "/role-templates/apply",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["Permissions", "Roles"],
+    }),
   }),
 })
 
@@ -255,4 +291,6 @@ export const {
   useUpdateFieldUserPermissionsMutation,
   useGetActionPermissionsQuery,
   useUpdateActionPermissionsMutation,
+  useApplyRoleGrantsMutation,
+  useLazyGetRoleGrantsQuery,
 } = permissionsApi
