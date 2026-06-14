@@ -1,41 +1,51 @@
 "use client";
 
 /**
- * HierarchyTab — the per-user "reporting line" view on /profile#hierarchy.
+ * HierarchyTab — the per-user "reporting structure" view on
+ * /profile#hierarchy, rendered as a top-down org chart that mirrors the role
+ * hierarchy chart at /settings/company (same boxed nodes + connector lines +
+ * LEVEL labels).
  *
- * Every user sees ONLY their own slice of the org role tree (scoped
- * server-side, see /api/profile/hierarchy):
- *   • Reporting line — the chain of roles ABOVE them (top-most → direct
- *     manager), so they can see who they ultimately report to.
- *   • Your position — their own role, with co-holders highlighted.
- *   • Your team — the roles + people that report up to them, with
- *     per-role head-counts. Collapsible.
+ * Crucially this is READ-ONLY and SCOPED: it does NOT use the admin
+ * RoleProvider (which loads the whole org tree and exposes edit/delete). It
+ * consumes the server-scoped /api/profile/hierarchy payload — the caller's
+ * ancestors (who they report to), their own role, and their descendant subtree
+ * (who reports to them) — and stitches it into one connected tree:
  *
- * The role tree itself is defined by admins in /settings/company; this is a
- * read-only, scoped projection of it for the individual.
+ *     topmost ancestor → … → manager → YOU → your team subtree
+ *
+ * Each node shows the role name, level, and a head-count; clicking a node
+ * reveals the people holding that role. The presentational <TreeConnectors>
+ * is shared with the admin chart so the lines look identical.
  */
 
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { TreeConnectors } from "@/components/organization/tree-connectors";
+import { useCanvasTransform } from "@/hooks/use-canvas-transform";
 import {
   Network,
   Users,
-  ArrowUp,
+  ChevronUp,
   ChevronDown,
-  ChevronRight,
-  ShieldCheck,
-  UserCircle2,
-  CornerDownRight,
+  ZoomIn,
+  ZoomOut,
+  Target,
+  Maximize2,
+  Minimize2,
+  Move,
 } from "lucide-react";
 import {
   useGetMyHierarchyQuery,
@@ -43,6 +53,14 @@ import {
   type HierarchyUser,
   type ScopedHierarchyChain,
 } from "@/lib/api/hierarchy";
+
+// A node in the stitched display tree. `children` here is the DISPLAY tree
+// (ancestor chain linked down to `you`, then `you`'s descendants), which is
+// not the same as the raw node.children for ancestor rows.
+interface DisplayNode {
+  node: HierarchyNode;
+  children: DisplayNode[];
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -52,270 +70,304 @@ function initials(name: string): string {
   return (first + last).toUpperCase() || "?";
 }
 
-// ── A single person chip (avatar + name), with a "You" marker. ──────────────
-function PersonChip({ person }: { person: HierarchyUser }) {
+// Stitch a chain (ancestors + you + descendants) into one connected tree whose
+// root is the top-most ancestor (or `you` when the caller is at the top).
+function buildDisplayTree(chain: ScopedHierarchyChain): DisplayNode {
+  const toDisplay = (n: HierarchyNode): DisplayNode => ({
+    node: n,
+    children: n.children.map(toDisplay),
+  });
+  let root = toDisplay(chain.you);
+  for (let i = chain.reportsTo.length - 1; i >= 0; i--) {
+    root = { node: chain.reportsTo[i], children: [root] };
+  }
+  return root;
+}
+
+function PersonRow({ person }: { person: HierarchyUser }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-full border bg-background py-1 pl-1 pr-3",
-        person.isYou && "border-primary/40 bg-primary/5",
+        "flex items-center gap-2 rounded-md px-2 py-1.5",
+        person.isYou && "bg-primary/5",
       )}
       title={person.email}
     >
-      <Avatar className="h-6 w-6 shrink-0">
-        {person.avatar ? (
-          <AvatarImage src={person.avatar} alt={person.name} />
-        ) : null}
+      <Avatar className="h-7 w-7 shrink-0">
+        {person.avatar ? <AvatarImage src={person.avatar} alt={person.name} /> : null}
         <AvatarFallback className="bg-muted text-[10px] font-semibold text-foreground/70">
           {initials(person.name)}
         </AvatarFallback>
       </Avatar>
-      <span className="truncate text-xs font-medium">
-        {person.name}
-        {person.isYou && (
-          <span className="ml-1 text-[10px] font-semibold text-primary">(You)</span>
-        )}
-      </span>
-    </div>
-  );
-}
-
-function PeopleList({ people }: { people: HierarchyUser[] }) {
-  if (people.length === 0) {
-    return (
-      <p className="text-xs italic text-muted-foreground">No one holds this role yet.</p>
-    );
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {people.map((p) => (
-        <PersonChip key={p.id} person={p} />
-      ))}
-    </div>
-  );
-}
-
-// ── An ancestor step in the upward reporting line. ──────────────────────────
-function ReportingStep({ node, isTop }: { node: HierarchyNode; isTop: boolean }) {
-  return (
-    <div className="relative pl-7">
-      {/* connector rail */}
-      <span
-        aria-hidden
-        className={cn(
-          "absolute left-2.5 w-px bg-border",
-          isTop ? "top-4 bottom-0" : "top-0 bottom-0",
-        )}
-      />
-      <span
-        aria-hidden
-        className="absolute left-1 top-3.5 flex h-3 w-3 items-center justify-center rounded-full border-2 border-border bg-background"
-      />
-      <div className="rounded-lg border bg-card px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            {node.isAdmin ? (
-              <ShieldCheck className="h-3.5 w-3.5" />
-            ) : (
-              <UserCircle2 className="h-3.5 w-3.5" />
-            )}
-          </span>
-          <span className="truncate text-sm font-semibold">{node.roleName}</span>
-          <Badge variant="secondary" className="ml-auto h-5 shrink-0 font-normal text-[11px]">
-            {node.userCount} {node.userCount === 1 ? "person" : "people"}
-          </Badge>
-        </div>
-        {node.users.length > 0 && (
-          <div className="mt-2">
-            <PeopleList people={node.users} />
-          </div>
-        )}
+      <div className="min-w-0">
+        <p className="truncate text-xs font-medium leading-tight">
+          {person.name}
+          {person.isYou && (
+            <span className="ml-1 text-[10px] font-semibold text-primary">(You)</span>
+          )}
+        </p>
+        <p className="truncate text-[11px] text-muted-foreground leading-tight">
+          {person.email}
+        </p>
       </div>
     </div>
   );
 }
 
-// ── A node in the downward "reports to you" subtree (recursive). ────────────
-function TeamNode({ node, depth }: { node: HierarchyNode; depth: number }) {
-  const hasChildren = node.children.length > 0;
-  // Expand the first two levels by default; deeper levels start collapsed to
-  // keep big org charts manageable.
-  const [open, setOpen] = useState(depth < 2);
+// One boxed role node + its connector + (recursively) its children row.
+// Mirrors the admin RoleChartNode layout so the shared TreeConnectors align,
+// but is read-only (no add/edit/delete) and collapses via local state.
+function OrgChartNode({
+  display,
+  isRoot,
+  isFirst,
+  isLast,
+}: {
+  display: DisplayNode;
+  isRoot: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const { node, children } = display;
+  const hasChildren = children.length > 0;
+  const [expanded, setExpanded] = useState(true);
 
   return (
-    <div className={cn(depth > 0 && "border-l border-border pl-3 sm:pl-4")}>
-      <div className="rounded-lg border bg-card">
-        <button
-          type="button"
-          onClick={() => hasChildren && setOpen((o) => !o)}
-          className={cn(
-            "flex w-full items-center gap-2 px-3 py-2.5 text-left",
-            hasChildren && "hover:bg-muted/40",
-            !hasChildren && "cursor-default",
-          )}
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground">
-            {hasChildren ? (
-              open ? (
-                <ChevronDown className="h-4 w-4" />
+    <div className="flex flex-col items-center relative flex-1">
+      <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            title={`${node.roleName} — click to see who holds this role`}
+            className={cn(
+              "relative rounded-lg p-3 w-52 text-center z-20 mx-4 transition-all hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+              node.isYou
+                ? "bg-primary/5 border-2 border-primary shadow-[3px_3px_0px_0px_hsl(var(--primary))] focus-visible:ring-primary"
+                : node.isAdmin
+                  ? "bg-amber-50 border-2 border-amber-500 shadow-[3px_3px_0px_0px_rgba(217,119,6,1)] focus-visible:ring-amber-500"
+                  : "bg-white border-2 border-slate-900 shadow-[3px_3px_0px_0px_rgba(15,23,42,1)] focus-visible:ring-slate-900",
+            )}
+          >
+            <h4 className="text-sm font-black text-slate-900 truncate">
+              {node.roleName || "Untitled Role"}
+            </h4>
+            <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">
+              Level {node.level ?? "?"}
+            </p>
+
+            <div className="mt-2 flex items-center justify-center gap-1.5">
+              {node.isYou && (
+                <span className="text-[9px] bg-primary/15 text-primary font-bold px-1.5 py-0.5 rounded">
+                  YOU
+                </span>
+              )}
+              {node.isAdmin && (
+                <span className="text-[9px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded border border-amber-300">
+                  ADMIN
+                </span>
+              )}
+              <span className="flex items-center text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                <Users className="h-2.5 w-2.5 mr-1" />
+                {node.userCount}
+              </span>
+            </div>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="center" className="w-64 p-0">
+          <div className="border-b px-3 py-2">
+            <p className="truncate text-sm font-semibold">{node.roleName}</p>
+            <p className="text-xs text-muted-foreground">
+              Level {node.level} · {node.userCount}{" "}
+              {node.userCount === 1 ? "person" : "people"}
+            </p>
+          </div>
+          <div className="max-h-60 overflow-auto p-1.5">
+            {node.users.length > 0 ? (
+              node.users.map((p) => <PersonRow key={p.id} person={p} />)
+            ) : (
+              <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">
+                No one holds this role yet.
+              </p>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {hasChildren && (
+        <>
+          <div className="w-px h-8 bg-slate-900 relative">
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              title={expanded ? "Collapse" : "Expand"}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-white border-2 border-slate-900 rounded-full flex items-center justify-center z-40 hover:bg-slate-100"
+            >
+              {expanded ? (
+                <ChevronUp className="h-4 w-4" />
               ) : (
-                <ChevronRight className="h-4 w-4" />
-              )
-            ) : (
-              <CornerDownRight className="h-3.5 w-3.5 opacity-50" />
-            )}
-          </span>
-          <span className="truncate text-sm font-medium">{node.roleName}</span>
-          {node.isAdmin && (
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-          )}
-          <Badge variant="secondary" className="ml-auto h-5 shrink-0 font-normal text-[11px]">
-            {node.userCount} {node.userCount === 1 ? "person" : "people"}
-          </Badge>
-        </button>
-
-        {open && node.users.length > 0 && (
-          <div className="border-t px-3 py-2.5">
-            <PeopleList people={node.users} />
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </button>
           </div>
-        )}
-      </div>
-
-      {open && hasChildren && (
-        <div className="mt-2 space-y-2">
-          {node.children.map((child) => (
-            <TeamNode key={child.roleId} node={child} depth={depth + 1} />
-          ))}
-        </div>
+          {expanded && (
+            <div className="flex items-start justify-center w-full pt-1">
+              {children.map((child, idx) => (
+                <OrgChartNode
+                  key={child.node.roleId}
+                  display={child}
+                  isRoot={false}
+                  isFirst={idx === 0}
+                  isLast={idx === children.length - 1}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-// ── A full chain: reporting line + your position + your team. ───────────────
-function ChainView({
+function ChainChart({
   chain,
-  showRoleHeading,
+  heading,
 }: {
   chain: ScopedHierarchyChain;
-  showRoleHeading: boolean;
+  heading?: string;
 }) {
-  const { reportsTo, you, totalReports } = chain;
+  const root = buildDisplayTree(chain);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showHint, setShowHint] = useState(true);
+
+  // Same pan/zoom canvas the /settings/company role chart uses: drag to pan,
+  // wheel/pinch to zoom toward the cursor, +/- buttons, center, fullscreen.
+  const {
+    transform,
+    setTransform,
+    isPanning,
+    containerRef,
+    handleMouseDown,
+    attachWheelListener,
+    zoomIn,
+    zoomOut,
+  } = useCanvasTransform({ initialScale: 0.85, minScale: 0.3, maxScale: 2 });
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Center the tree horizontally within the canvas (its content is
+  // justify-center, so the root lands in the middle) and pin it near the top.
+  const centerStage = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const cw = container.clientWidth;
+    const scale = window.innerWidth < 640 ? 0.6 : 0.85;
+    const stageW = stageRef.current?.scrollWidth ?? 0;
+    setTransform({
+      x: Math.round(cw / 2 - (stageW / 2) * scale),
+      y: 24,
+      scale,
+    });
+  }, [containerRef, setTransform]);
+
+  useEffect(() => {
+    const t = setTimeout(centerStage, 150);
+    const onResize = () => centerStage();
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", onResize);
+    };
+    // Re-center when the layout context changes (fullscreen toggle, new data).
+  }, [centerStage, isFullscreen]);
+
+  useEffect(() => attachWheelListener(), [attachWheelListener]);
+  useEffect(() => {
+    if (isPanning) setShowHint(false);
+  }, [isPanning]);
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {showRoleHeading && (
+    <div
+      className={cn(
+        "space-y-2",
+        isFullscreen &&
+          "fixed inset-0 z-[100] bg-background p-3 sm:p-5 overflow-auto",
+      )}
+    >
+      {heading && (
         <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-          <span>As {you.roleName}</span>
+          <span>As {heading}</span>
           <span className="h-px flex-1 bg-border" />
         </div>
       )}
+      {chain.totalReports > 0 && (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/80 tabular-nums">
+            {chain.totalReports}
+          </span>{" "}
+          {chain.totalReports === 1 ? "person reports" : "people report"} up to you.
+        </p>
+      )}
 
-      {/* ── Reporting line (who you report to) ─────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
-              <ArrowUp className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <CardTitle className="text-base leading-tight">Reporting line</CardTitle>
-              <CardDescription className="mt-0.5">
-                {reportsTo.length > 0
-                  ? "Who you report up to, from the top of your line down to your manager."
-                  : "You're at the top of your reporting line."}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-0">
-            {reportsTo.map((node, idx) => (
-              <ReportingStep key={node.roleId} node={node} isTop={idx === 0} />
-            ))}
+      <div className="relative">
+        {/* Control bar (zoom out / % / zoom in / center / fullscreen) */}
+        <div className="absolute right-2 top-2 z-30 flex items-center gap-0.5 rounded-lg border bg-background/90 p-0.5 shadow-sm backdrop-blur">
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={zoomOut} title="Zoom out">
+            <ZoomOut className="h-4 w-4" />
+          </Button>
+          <span className="min-w-10 text-center text-xs font-semibold tabular-nums text-muted-foreground">
+            {Math.round(transform.scale * 100)}%
+          </span>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={zoomIn} title="Zoom in">
+            <ZoomIn className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => centerStage()} title="Center / reset view">
+            <Target className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsFullscreen((f) => !f)} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </Button>
+        </div>
 
-            {/* Your own position — the anchor of the chain. */}
-            <div className="relative pl-7">
-              {reportsTo.length > 0 && (
-                <span
-                  aria-hidden
-                  className="absolute left-2.5 top-0 h-3.5 w-px bg-border"
-                />
-              )}
-              <span
-                aria-hidden
-                className="absolute left-1 top-3.5 flex h-3 w-3 items-center justify-center rounded-full border-2 border-primary bg-primary"
-              />
-              <div className="rounded-lg border-2 border-primary/40 bg-primary/5 px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
-                    {you.isAdmin ? (
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                    ) : (
-                      <UserCircle2 className="h-3.5 w-3.5" />
-                    )}
-                  </span>
-                  <span className="truncate text-sm font-semibold">{you.roleName}</span>
-                  <Badge className="ml-auto h-5 shrink-0 border-transparent bg-primary/15 text-[11px] font-normal text-primary hover:bg-primary/15">
-                    Your role
-                  </Badge>
-                </div>
-                {you.users.length > 0 && (
-                  <div className="mt-2">
-                    <PeopleList people={you.users} />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── Your team (who reports to you) ─────────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-              <Users className="h-4 w-4" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <CardTitle className="text-base leading-tight">Your team</CardTitle>
-              <CardDescription className="mt-0.5">
-                {totalReports > 0 ? (
-                  <>
-                    <span className="font-medium text-foreground/80 tabular-nums">
-                      {totalReports}
-                    </span>{" "}
-                    {totalReports === 1 ? "person reports" : "people report"} up to
-                    you across the roles below.
-                  </>
-                ) : (
-                  "No one reports to you yet."
-                )}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {you.children.length > 0 ? (
-            <div className="space-y-2">
-              {you.children.map((child) => (
-                <TeamNode key={child.roleId} node={child} depth={0} />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-8 text-center">
-              <Users className="h-6 w-6 text-muted-foreground/50" />
-              <p className="mt-2 text-sm font-medium text-foreground/70">
-                No direct reports
-              </p>
-              <p className="mt-0.5 max-w-xs text-xs text-muted-foreground">
-                No roles sit below {you.roleName} in the org hierarchy yet.
-              </p>
+        {/* Pan/zoom canvas — dotted background that tracks the transform,
+            matching the /settings/company role chart. Read-only. */}
+        <div
+          ref={containerRef}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleMouseDown as unknown as React.TouchEventHandler<HTMLDivElement>}
+          className={cn(
+            "relative overflow-hidden rounded-xl border bg-slate-50/70 dark:bg-slate-950/40 select-none",
+            isPanning ? "cursor-grabbing" : "cursor-grab",
+            isFullscreen ? "h-[calc(100vh-7rem)]" : "h-[62vh]",
+          )}
+          style={{
+            backgroundImage: "radial-gradient(#cbd5e1 0.8px, transparent 0.8px)",
+            backgroundSize: `${20 * transform.scale}px ${20 * transform.scale}px`,
+            backgroundPosition: `${transform.x}px ${transform.y}px`,
+          }}
+        >
+          {showHint && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full border bg-white/85 px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm backdrop-blur dark:bg-slate-800/85 dark:text-slate-300">
+                <Move className="h-3 w-3" /> Drag to pan · scroll to zoom
+              </span>
             </div>
           )}
-        </CardContent>
-      </Card>
+
+          <div
+            ref={stageRef}
+            className="absolute origin-top-left will-change-transform"
+            style={{
+              transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+              transition: isPanning ? "none" : "transform 0.12s ease-out",
+            }}
+          >
+            <div className="min-w-max flex justify-center p-8 sm:p-12">
+              <OrgChartNode display={root} isRoot isFirst isLast />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -332,7 +384,7 @@ export default function HierarchyTab() {
       <Card>
         <CardContent className="py-10 text-center">
           <Network className="mx-auto h-7 w-7 text-muted-foreground/50" />
-          <p className="mt-3 text-sm font-medium">Couldn&apos;t load your hierarchy</p>
+          <p className="mt-3 text-sm font-medium">Couldn&apos;t load your reporting structure</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Please refresh the page or try again later.
           </p>
@@ -372,14 +424,18 @@ export default function HierarchyTab() {
         <div className="min-w-0">
           <h2 className="text-lg font-semibold leading-tight">Reporting structure</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Where you sit in the organization — who you report to and who
-            reports to you.
+            Where you sit in the organization — who you report to and who reports
+            to you. Click any role to see who holds it.
           </p>
         </div>
       </div>
 
       {hierarchy.chains.map((chain) => (
-        <ChainView key={chain.you.roleId} chain={chain} showRoleHeading={multi} />
+        <ChainChart
+          key={chain.you.roleId}
+          chain={chain}
+          heading={multi ? chain.you.roleName : undefined}
+        />
       ))}
     </div>
   );
@@ -391,32 +447,11 @@ function HierarchySkeleton() {
       <div className="flex items-start gap-3">
         <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
         <div className="flex-1 space-y-2">
-          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-72" />
         </div>
       </div>
-      <Card>
-        <CardHeader className="pb-3">
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="h-4 w-64 mt-2" />
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-lg" />
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-3">
-          <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-4 w-56 mt-2" />
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-lg" />
-          ))}
-        </CardContent>
-      </Card>
+      <Skeleton className="h-[60vh] w-full rounded-xl" />
     </div>
   );
 }
